@@ -1,0 +1,18 @@
+# EC2-D (Member 3): Payroll + Audit.   Run from the deploy/ folder:
+#   docker compose -f ec2-d.compose.yml up -d --build
+# Ports are published so the gateway (EC2-A) can reach them over the PRIVATE network.
+# SECURITY GROUP: allow these ports ONLY from the project's own security group - never from 0.0.0.0/0.
+x-service: &service
+  env_file: .env
+  restart: on-failure
+
+services:
+  payroll-service:
+    <<: *service
+    build: ../services/payroll-service
+    ports: ["3007:3007"]
+
+  audit-service:
+    <<: *service
+    build: ../services/audit-service
+    ports: ["3008:3008"]

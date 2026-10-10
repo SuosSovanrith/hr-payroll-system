@@ -1,0 +1,18 @@
+# EC2-C (Member 2): Leave + Performance.   Run from the deploy/ folder:
+#   docker compose -f ec2-c.compose.yml up -d --build
+# Ports are published so the gateway (EC2-A) can reach them over the PRIVATE network.
+# SECURITY GROUP: allow these ports ONLY from the project's own security group - never from 0.0.0.0/0.
+x-service: &service
+  env_file: .env
+  restart: on-failure
+
+services:
+  leave-service:
+    <<: *service
+    build: ../services/leave-service
+    ports: ["3005:3005"]
+
+  performance-service:
+    <<: *service
+    build: ../services/performance-service
+    ports: ["3006:3006"]

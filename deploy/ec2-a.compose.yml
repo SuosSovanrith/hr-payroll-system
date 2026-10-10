@@ -1,0 +1,37 @@
+# EC2-A (EDGE): Nginx + 2 gateways + Redis + Registration + Login.   Run from the deploy/ folder:
+#   docker compose -f ec2-a.compose.yml up -d --build
+# Only port 80 (Nginx) is published; open it to the internet in the security group.
+x-service: &service
+  env_file: .env
+  restart: on-failure
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: on-failure
+
+  nginx:
+    build: ../nginx
+    ports: ["80:80"]
+    depends_on: [gateway1, gateway2]
+    restart: on-failure
+
+  gateway1:
+    <<: *service
+    build: ../services/api-gateway
+    hostname: gw1
+    depends_on: [redis]
+
+  gateway2:
+    <<: *service
+    build: ../services/api-gateway
+    hostname: gw2
+    depends_on: [redis]
+
+  registration-service:
+    <<: *service
+    build: ../services/registration-service
+
+  login-service:
+    <<: *service
+    build: ../services/login-service

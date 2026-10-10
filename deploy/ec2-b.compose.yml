@@ -1,0 +1,18 @@
+# EC2-B (Member 1): Employee Profile + Attendance.   Run from the deploy/ folder:
+#   docker compose -f ec2-b.compose.yml up -d --build
+# Ports are published so the gateway (EC2-A) can reach them over the PRIVATE network.
+# SECURITY GROUP: allow these ports ONLY from the project's own security group - never from 0.0.0.0/0.
+x-service: &service
+  env_file: .env
+  restart: on-failure
+
+services:
+  employee-service:
+    <<: *service
+    build: ../services/employee-service
+    ports: ["3003:3003"]
+
+  attendance-service:
+    <<: *service
+    build: ../services/attendance-service
+    ports: ["3004:3004"]

@@ -1,0 +1,67 @@
+# Whole system on ONE machine (local development / quick demo).
+#   docker compose up --build        start everything
+#   docker compose down              stop everything
+# Only Nginx publishes a port (80) - everything else is reachable only through the gateway.
+x-service: &service
+  env_file: .env
+  restart: on-failure
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: on-failure
+
+  # ---- Edge: Nginx -> 2 gateway replicas (load balancing) ----
+  nginx:
+    build: ./nginx
+    ports: ["80:80"]
+    depends_on: [gateway1, gateway2]
+    restart: on-failure
+
+  gateway1:
+    <<: *service
+    build: ./services/api-gateway
+    hostname: gw1 # shown as "servedBy" in GET /api/lb-info
+    depends_on: [redis]
+
+  gateway2:
+    <<: *service
+    build: ./services/api-gateway
+    hostname: gw2
+    depends_on: [redis]
+
+  # ---- Common services ----
+  registration-service:
+    <<: *service
+    build: ./services/registration-service
+
+  login-service:
+    <<: *service
+    build: ./services/login-service
+
+  # ---- Member 1 ----
+  employee-service:
+    <<: *service
+    build: ./services/employee-service
+
+  attendance-service:
+    <<: *service
+    build: ./services/attendance-service
+
+  # ---- Member 2 ----
+  leave-service:
+    <<: *service
+    build: ./services/leave-service
+
+  performance-service:
+    <<: *service
+    build: ./services/performance-service
+
+  # ---- Member 3 ----
+  payroll-service:
+    <<: *service
+    build: ./services/payroll-service
+
+  audit-service:
+    <<: *service
+    build: ./services/audit-service
