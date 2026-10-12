@@ -1,8 +1,13 @@
-import { notImplemented } from '../common/errors.js';
+import Employee from '../models/Employee.js';
+import { ok } from '../common/response.js';
+import { notFound } from '../common/errors.js';
 
-// TODO [Member 1] GET /internal/employees/:userId  (service-to-service, used by Payroll for payslip details)
-//  Contract (do not change - Payroll depends on it): respond ok(res, { userId, firstName, lastName, email, department, jobTitle }).
-//  Not found -> 404 (Payroll turns that into "employee profile missing").
+// Service-to-service contract (Payroll depends on it, do not rename fields):
+// { userId, firstName, lastName, email, department, jobTitle }
 export const getEmployeeInternal = async (req, res) => {
-  throw notImplemented('GET /internal/employees/:userId');
+  const employee = await Employee.findOne({ userId: req.params.userId });
+  if (!employee) throw notFound('Employee profile not found');
+
+  const { userId, firstName, lastName, email, department, jobTitle } = employee;
+  return ok(res, { userId, firstName, lastName, email, department, jobTitle });
 };
