@@ -5,7 +5,6 @@
 import Employee from '../models/Employee.js';
 import { isStaff } from '../common/roles.js';
 import { ok, created } from '../common/response.js';
-//import { badRequest, forbidden, notFound, conflict, notImplemented } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { sendAudit } from '../common/audit.js';
 
@@ -50,7 +49,7 @@ export const createEmployee = async (req, res) => {
   return created(res, employee, 'Employee profile created');
 };
 
-// TODO [Member 1] GET /api/employees  (HR, Admin)  -> list profiles
+// [DONE - Member 1] GET /api/employees  (HR, Admin)  -> list profiles
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 export const listEmployees = async (req, res) => {
@@ -79,14 +78,14 @@ export const listEmployees = async (req, res) => {
 };
 
 
-// TODO [Member 1] GET /api/employees/me  (any logged-in user)  -> own profile
+// [DONE - Member 1] GET /api/employees/me  (any logged-in user)  -> own profile
 export const getMyProfile = async (req, res) => {
   const employee = await Employee.findOne({ userId: req.user.id });
   if (!employee) throw notFound('Profile not created yet, ask HR');
   return ok(res, employee);
 };
 
-// TODO [Member 1] GET /api/employees/:userId  (HR/Admin: anyone, Employee: ONLY themselves)
+// [DONE - Member 1] GET /api/employees/:userId  (HR/Admin: anyone, Employee: ONLY themselves)
 export const getEmployee = async (req, res) => {
   const { userId } = req.params;
 
@@ -100,7 +99,7 @@ export const getEmployee = async (req, res) => {
   return ok(res, employee);
 };
 
-// TODO [Member 1] PUT /api/employees/:userId  (HR/Admin: all fields, Employee: own phone + address ONLY)
+// [DONE - Member 1] PUT /api/employees/:userId  (HR/Admin: all fields, Employee: own phone + address ONLY)
 const STAFF_UPDATE_FIELDS = [
   'firstName', 'lastName', 'email', 'phone', 'address', 'dateOfBirth',
   'department', 'jobTitle', 'employmentType', 'hireDate', 'status',
@@ -138,7 +137,7 @@ export const updateEmployee = async (req, res) => {
   return ok(res, employee, 'Employee updated');
 };
 
-// TODO [Member 1] DELETE /api/employees/:userId  (Admin only)  -> SOFT delete
+// [DONE - Member 1] DELETE /api/employees/:userId  (Admin only)  -> SOFT delete
 export const deleteEmployee = async (req, res) => {
   const { userId } = req.params;
 

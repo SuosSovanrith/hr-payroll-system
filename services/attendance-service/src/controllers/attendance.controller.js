@@ -1,10 +1,8 @@
 // Attendance & Time-Tracking Service.
 // Models: Attendance. Rules live in config/constants.js. Dates are stored as "YYYY-MM-DD" strings in `date`.
-import { notImplemented } from '../common/errors.js';
 import Attendance from '../models/Attendance.js';
 import { isStaff } from '../common/roles.js';
 import { ok, created } from '../common/response.js';
-// import { badRequest, forbidden, conflict, notImplemented } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { STANDARD_WORK_HOURS, LATE_AFTER_HOUR, WORK_TIMEZONE } from '../config/constants.js';
 
@@ -21,7 +19,7 @@ const todayString = (d = new Date()) => {
 };
 const localHour = (d) => Number(localParts(d).hour);
 
-// TODO [Member 1] POST /api/attendance/clock-in  (any logged-in user)
+// [DONE - Member 1] POST /api/attendance/clock-in  (any logged-in user)
 export const clockIn = async (req, res) => {
   const now = new Date();
   const date = todayString(now);
@@ -34,7 +32,7 @@ export const clockIn = async (req, res) => {
   return created(res, record, 'Clocked in');
 };
 
-// TODO [Member 1] POST /api/attendance/clock-out  (any logged-in user)   Body (optional): { workLog }
+// [DONE - Member 1] POST /api/attendance/clock-out  (any logged-in user)   Body (optional): { workLog }
 export const clockOut = async (req, res) => {
   const now = new Date();
   const { workLog } = req.body ?? {};
@@ -55,13 +53,13 @@ export const clockOut = async (req, res) => {
   return ok(res, record, 'Clocked out');
 };
 
-// TODO [Member 1] GET /api/attendance/me  (any logged-in user)
+// [DONE - Member 1] GET /api/attendance/me  (any logged-in user)
 export const getMyAttendance = async (req, res) => {
   const filter = { userId: req.user.id, ...dateRange(req.query) };
   return ok(res, await findPage(filter, req.query));
 };
 
-// TODO [Member 1] GET /api/attendance  (HR, Admin)  -> all records
+// [DONE - Member 1] GET /api/attendance  (HR, Admin)  -> all records
 export const listAttendance = async (req, res) => {
   const { userId } = req.query;
   if (userId !== undefined && typeof userId !== 'string') throw badRequest('userId must be a string');
@@ -71,7 +69,7 @@ export const listAttendance = async (req, res) => {
 };
 
 // Shared helper for the two summary endpoints below.
-// TODO [Member 1] Implement buildSummary(userId, month) where month = "YYYY-MM".
+// [DONE - Member 1] Implement buildSummary(userId, month) where month = "YYYY-MM".
 const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const assertMonth = (month) => {
   if (typeof month !== 'string' || !MONTH_RE.test(month)) throw badRequest('month must be YYYY-MM');
@@ -106,7 +104,7 @@ export const buildSummary = async (userId, month) => {
   };
 };
 
-// TODO [Member 1] GET /api/attendance/summary/:userId?month=YYYY-MM  (HR/Admin: anyone, Employee: ONLY themselves)
+// [DONE - Member 1] GET /api/attendance/summary/:userId?month=YYYY-MM  (HR/Admin: anyone, Employee: ONLY themselves)
 export const getSummary = async (req, res) => {
   const { userId } = req.params;
   assertMonth(req.query.month);
