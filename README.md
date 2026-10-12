@@ -3,8 +3,8 @@
 Backend-only, microservice-based HR & Payroll platform — midterm project for **Cloud Native Development**.
 Node.js 24 · Express · MongoDB Atlas · JWT + RBAC · Nginx + Redis load balancing · Docker Compose · AWS EC2.
 
-> **Status:** infrastructure is complete and tested (gateway, auth, Docker, Nginx, deploy files).
-> Business endpoints are scaffolded with models, routes, role guards, and detailed `TODO` comments for each member to implement.
+> **Status:** all service endpoints are implemented (registration, employee, attendance, leave, performance, payroll, audit).
+> Remaining work is integration testing against MongoDB Atlas, the Postman run, screenshots and the project document.
 > See [Implementation status](#10-implementation-status--todo-tracker).
 
 ---
@@ -332,9 +332,9 @@ Response header `X-Served-By` (gateway instance) and `X-Upstream` (Nginx upstrea
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
 | POST | `/api/auth/register` | Public | Body `{ email, password, fullName }`. Role is forced to `employee`. 409 if email exists | ✅ |
-| POST | `/api/auth/register/staff` | Admin | Body `{ email, password, fullName, role }`. Create HR/Admin accounts | 🔲 Common |
-| GET | `/api/users` | Staff | List users (`?role=&isActive=&search=`, paginated) | 🔲 Common |
-| PATCH | `/api/users/:id/role` | Admin | Body `{ role }`. Audited as `ROLE_CHANGED` | 🔲 Common |
+| POST | `/api/auth/register/staff` | Admin | Body `{ email, password, fullName, role }`. Create HR/Admin accounts | ✅ |
+| GET | `/api/users` | Staff | List users (`?role=&isActive=&search=`, paginated) | ✅ |
+| PATCH | `/api/users/:id/role` | Admin | Body `{ role }`. Audited as `ROLE_CHANGED` | ✅ |
 
 ### 7.3 Login Service (3002, DB `hr_auth`)
 
@@ -349,24 +349,24 @@ JWT payload: `{ sub: <userId>, role, email, iat, exp }`, HS256, default 1 h.
 
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
-| POST | `/api/employees` | Staff | Create profile `{ userId, firstName, lastName, email, department, jobTitle, … }`. 409 if exists | 🔲 |
-| GET | `/api/employees` | Staff | List/search (`?department=&status=&search=`) | 🔲 |
-| GET | `/api/employees/me` | Any | Own profile | 🔲 |
-| GET | `/api/employees/:userId` | Owner / Staff | Profile detail | 🔲 |
-| PUT | `/api/employees/:userId` | Owner (phone, address only) / Staff (all) | Update profile | 🔲 |
-| DELETE | `/api/employees/:userId` | Admin | Soft delete (`status: terminated`) | 🔲 |
-| GET | `/internal/employees/:userId` | Internal | `{ userId, firstName, lastName, email, department, jobTitle }` for Payroll | 🔲 |
+| POST | `/api/employees` | Staff | Create profile `{ userId, firstName, lastName, email, department, jobTitle, … }`. 409 if exists | ✅ |
+| GET | `/api/employees` | Staff | List/search (`?department=&status=&search=`) | ✅ |
+| GET | `/api/employees/me` | Any | Own profile | ✅ |
+| GET | `/api/employees/:userId` | Owner / Staff | Profile detail | ✅ |
+| PUT | `/api/employees/:userId` | Owner (phone, address only) / Staff (all) | Update profile | ✅ |
+| DELETE | `/api/employees/:userId` | Admin | Soft delete (`status: terminated`) | ✅ |
+| GET | `/internal/employees/:userId` | Internal | `{ userId, firstName, lastName, email, department, jobTitle }` for Payroll | ✅ |
 
 ### 7.5 Attendance & Time-Tracking Service (3004, DB `hr_attendance`) — Member 1
 
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
-| POST | `/api/attendance/clock-in` | Any | Start today's record. 409 if already clocked in | 🔲 |
-| POST | `/api/attendance/clock-out` | Any | Body `{ workLog? }`. Computes `totalHours`, `overtimeHours` (> 8 h) | 🔲 |
-| GET | `/api/attendance/me` | Any | Own records (`?from=&to=`) | 🔲 |
-| GET | `/api/attendance` | Staff | All records (`?userId=&from=&to=`) | 🔲 |
-| GET | `/api/attendance/summary/:userId?month=YYYY-MM` | Owner / Staff | `{ userId, month, daysPresent, totalHours, overtimeHours }` | 🔲 |
-| GET | `/internal/attendance/summary/:userId?month=YYYY-MM` | Internal | Same summary, for Payroll | 🔲 |
+| POST | `/api/attendance/clock-in` | Any | Start today's record. 409 if already clocked in | ✅ |
+| POST | `/api/attendance/clock-out` | Any | Body `{ workLog? }`. Computes `totalHours`, `overtimeHours` (> 8 h) | ✅ |
+| GET | `/api/attendance/me` | Any | Own records (`?from=&to=`) | ✅ |
+| GET | `/api/attendance` | Staff | All records (`?userId=&from=&to=`) | ✅ |
+| GET | `/api/attendance/summary/:userId?month=YYYY-MM` | Owner / Staff | `{ userId, month, daysPresent, totalHours, overtimeHours }` | ✅ |
+| GET | `/internal/attendance/summary/:userId?month=YYYY-MM` | Internal | Same summary, for Payroll | ✅ |
 
 ### 7.6 Leave Management Service (3005, DB `hr_leave`) — Member 2
 
@@ -408,8 +408,8 @@ Formula (`config/payrollRules.js`, ✅ already implemented): `hourly = base/160`
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
 | POST | `/internal/logs` | Internal | Ingest an audit event (used by gateway, login, registration) | ✅ |
-| GET | `/api/audit/logs` | Admin | Search (`?actorId=&action=&service=&outcome=&from=&to=`). `outcome=failure` = security view | 🔲 |
-| GET | `/api/audit/logs/:id` | Admin | One entry | 🔲 |
+| GET | `/api/audit/logs` | Admin | Search (`?actorId=&action=&service=&outcome=&from=&to=`). `outcome=failure` = security view | ✅ |
+| GET | `/api/audit/logs/:id` | Admin | One entry | ✅ |
 
 **Events already emitted:** `USER_REGISTERED`, `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGIN_BLOCKED`, `ACCESS_DENIED` (any 401/403 at the gateway), and `<METHOD> <path>` for every state-changing request. Services add business events with `sendAudit({ action: 'PAYSLIP_GENERATED', ... })`.
 
@@ -480,11 +480,11 @@ grep -rn "TODO \[All members\]" services --include=*.js  # Cross-cutting
 
 | Area | Done ✅ | To do 🔲 |
 |---|---|---|
-| **Common infrastructure** | Gateway (JWT, RBAC route table, proxy, audit forwarding, header spoof protection, Redis LB demo), shared helpers, Dockerfiles, compose files, Nginx, EC2 compose files, seed script | Registration: `register/staff`, `GET /users`, `PATCH /users/:id/role`. (Optional) change-password |
-| **Member 1** | Models, routes + role guards, constants | Employee: 6 controllers + 1 internal. Attendance: clock-in/out, my records, list, summary (+ internal) |
-| **Member 2** | Models, routes + role guards, default balances | Leave: 6 controllers. Performance: 6 controllers |
-| **Member 3** | Models, routes + role guards, payroll formula, audit ingest | Payroll: 6 controllers (incl. calls to Employee + Attendance). Audit: list + get |
-| **Everyone** | – | Add your endpoints to the gateway route table if you add new ones · Postman collection · screenshots · project document |
+| **Common infrastructure** | Gateway, shared helpers, Dockerfiles, compose files, Nginx, EC2 compose files, seed script, Registration (`register/staff`, `GET /users`, `PATCH /users/:id/role`) | (Optional) change-password |
+| **Member 1** | Models, routes, Employee (6 + 1 internal), Attendance (clock-in/out, my records, list, summary + internal) | – |
+| **Member 2** | Models, routes, Leave (6), Performance (6) | – |
+| **Member 3** | Models, routes, payroll formula, Payroll (6, with Employee + Attendance calls), Audit ingest + list/get | – |
+| **Everyone** | Postman collection (`docs/postman/`) | Run it against Atlas / EC2 · screenshots · project document |
 
 **Suggested order:** (1) Common: finish Registration → everybody has HR/Admin tokens. (2) Employee profile (others need profiles for realistic data). (3) Attendance → (4) Payroll integration. Leave/Performance/Audit are independent.
 

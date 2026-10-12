@@ -1,101 +1,100 @@
 // Performance Review Service. Model: Review. HR/Admin write reviews, employees read their own.
-import { badRequest, conflict, forbidden, notFound } from '../common/errors.js';
+// req.user = { id, role, email } is filled from the gateway headers.
+import Review from '../models/Review.js';
+import { isStaff } from '../common/roles.js';
 import { ok, created } from '../common/response.js';
+import { badRequest, conflict, forbidden, notFound } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { sendAudit } from '../common/audit.js';
-import { isStaff } from '../common/roles.js';
-import Review from '../models/Review.js';
 
-const RATING_FIELDS = ['quality', 'productivity', 'teamwork', 'communication'];
+const RATING_KEYS = ['quality', 'productivity', 'teamwork', 'communication'];
 
-// Checks the four ratings are numbers from 1 to 5 and returns a clean { quality, ... } object (extra keys dropped).
-// Done here so a bad value gives a clear 400 instead of a NaN average or a Mongoose cast error.
-const parseRatings = (input) => {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) throw badRequest('ratings must be an object');
-  const ratings = {};
-  const details = [];
-  for (const field of RATING_FIELDS) {
-    const value = input[field];
-    if (typeof value !== 'number' || !Number.isFinite(value) || value < 1 || value > 5) {
-      details.push({ field: `ratings.${field}`, message: 'must be a number between 1 and 5' });
-    } else {
-      ratings[field] = value;
-    }
+// Validates a ratings object. With `partial`, only the keys that are present are checked (for updates).
+const parseRatings = (ratings, { partial = false } = {}) => {
+  if (typeof ratings !== 'object' || ratings === null || Array.isArray(ratings)) {
+    throw badRequest(`ratings must be an object with: ${RATING_KEYS.join(', ')}`);
   }
-  if (details.length) throw badRequest('Invalid ratings', details);
-  return ratings;
+  const unknown = Object.keys(ratings).filter((k) => !RATING_KEYS.includes(k));
+  if (unknown.length) throw badRequest(`Unknown rating field(s): ${unknown.join(', ')}`);
+
+  const out = {};
+  for (const key of RATING_KEYS) {
+    if (ratings[key] === undefined) {
+      if (!partial) throw badRequest(`ratings.${key} is required`);
+      continue;
+    }
+    const value = ratings[key];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 1 || value > 5) {
+      throw badRequest(`ratings.${key} must be a number between 1 and 5`);
+    }
+    out[key] = value;
+  }
+  return out;
 };
 
-// Average of the 4 ratings, rounded to 1 decimal.
-const overallOf = (ratings) =>
-  Math.round((RATING_FIELDS.reduce((sum, f) => sum + ratings[f], 0) / RATING_FIELDS.length) * 10) / 10;
+const overall = (ratings) => {
+  const sum = RATING_KEYS.reduce((acc, k) => acc + ratings[k], 0);
+  return Math.round((sum / RATING_KEYS.length) * 10) / 10; // one decimal
+};
+
+const parseGoals = (goals) => {
+  if (!Array.isArray(goals) || goals.some((g) => typeof g !== 'string')) {
+    throw badRequest('goals must be an array of strings');
+  }
+  return goals.map((g) => g.trim()).filter(Boolean);
+};
 
 const parseText = (value, field) => {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw badRequest(`Invalid ${field}`, [{ field, message: 'must be a non-empty string' }]);
-  }
+  if (typeof value !== 'string') throw badRequest(`${field} must be a string`);
   return value.trim();
 };
 
-const parseFeedback = (value) => {
-  if (typeof value !== 'string') throw badRequest('Invalid feedback', [{ field: 'feedback', message: 'must be a string' }]);
-  return value;
-};
-
-const parseGoals = (value) => {
-  if (!Array.isArray(value) || !value.every((g) => typeof g === 'string')) {
-    throw badRequest('Invalid goals', [{ field: 'goals', message: 'must be an array of strings' }]);
-  }
-  return value;
-};
-
 // POST /api/reviews  (HR, Admin)
-// Body: { userId, period, ratings: { quality, productivity, teamwork, communication }, feedback, goals[] }
 export const createReview = async (req, res) => {
-  const { userId, period, ratings, feedback, goals } = req.body; // whitelist: nothing else from the body is used
+  const { userId, period, ratings, feedback, goals } = req.body;
 
-  const cleanUserId = parseText(userId, 'userId'); // must be plain strings, never query operators
-  const cleanPeriod = parseText(period, 'period');
+  if (typeof userId !== 'string' || !userId.trim()) throw badRequest('userId must be a non-empty string');
+  if (typeof period !== 'string' || !period.trim()) throw badRequest('period must be a non-empty string');
+
   const cleanRatings = parseRatings(ratings);
-  const cleanFeedback = feedback === undefined ? undefined : parseFeedback(feedback);
-  const cleanGoals = goals === undefined ? [] : parseGoals(goals);
-
-  const existing = await Review.findOne({ userId: cleanUserId, period: cleanPeriod });
-  if (existing) throw conflict(`A review for this user and period (${cleanPeriod}) already exists`);
-
-  const review = await Review.create({
-    userId: cleanUserId,
-    reviewerId: req.user.id, // from the gateway headers, never from the body
-    period: cleanPeriod,
+  const data = {
+    userId: userId.trim(),
+    reviewerId: req.user.id,
+    period: period.trim(),
     ratings: cleanRatings,
-    overallRating: overallOf(cleanRatings),
-    feedback: cleanFeedback,
-    goals: cleanGoals,
-  });
+    overallRating: overall(cleanRatings),
+  };
+  if (feedback !== undefined) data.feedback = parseText(feedback, 'feedback');
+  if (goals !== undefined) data.goals = parseGoals(goals);
+
+  if (await Review.exists({ userId: data.userId, period: data.period })) {
+    throw conflict('A review already exists for this employee and period');
+  }
+
+  const review = await Review.create(data); // the unique (userId, period) index also guards against races
 
   sendAudit({
-    actorId: req.user.id,
-    actorRole: req.user.role,
-    action: 'REVIEW_CREATED',
-    resource: 'review',
-    resourceId: String(review._id),
-    method: req.method,
-    path: req.originalUrl,
-    statusCode: 201,
-    outcome: 'success',
-    details: { userId: review.userId, period: review.period, overallRating: review.overallRating },
+    actorId: req.user.id, actorRole: req.user.role, action: 'REVIEW_CREATED',
+    resource: 'review', resourceId: review.id, method: req.method, path: req.originalUrl,
+    statusCode: 201, outcome: 'success', details: { employeeId: review.userId, period: review.period },
   });
-
-  return created(res, review);
+  return created(res, review, 'Review created');
 };
 
-// GET /api/reviews  (HR, Admin)  -> filters ?userId= ?period=, paginated -> { items, page, limit, total }
+// GET /api/reviews  (HR, Admin)  -> filters ?userId= ?period=
 export const listReviews = async (req, res) => {
-  const { page, limit, skip } = getPagination(req.query);
+  const { userId, period } = req.query;
   const filter = {};
-  if (req.query.userId) filter.userId = String(req.query.userId);
-  if (req.query.period) filter.period = String(req.query.period);
+  if (userId !== undefined) {
+    if (typeof userId !== 'string' || !userId.trim()) throw badRequest('userId must be a string');
+    filter.userId = userId.trim();
+  }
+  if (period !== undefined) {
+    if (typeof period !== 'string' || !period.trim()) throw badRequest('period must be a string');
+    filter.period = period.trim();
+  }
 
+  const { page, limit, skip } = getPagination(req.query);
   const [items, total] = await Promise.all([
     Review.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
     Review.countDocuments(filter),
@@ -103,10 +102,15 @@ export const listReviews = async (req, res) => {
   return ok(res, { items, page, limit, total });
 };
 
-// GET /api/reviews/me  (any logged-in user)  -> own reviews, newest first
+// GET /api/reviews/me  (any logged-in user)
 export const myReviews = async (req, res) => {
-  const reviews = await Review.find({ userId: req.user.id }).sort({ createdAt: -1 });
-  return ok(res, reviews);
+  const filter = { userId: req.user.id };
+  const { page, limit, skip } = getPagination(req.query);
+  const [items, total] = await Promise.all([
+    Review.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    Review.countDocuments(filter),
+  ]);
+  return ok(res, { items, page, limit, total });
 };
 
 // GET /api/reviews/:id  (owner of the review, or HR/Admin)
@@ -117,29 +121,41 @@ export const getReview = async (req, res) => {
   return ok(res, review);
 };
 
-// PUT /api/reviews/:id  (HR, Admin)  -> update ratings / feedback / goals
-// userId, reviewerId and period can never be changed. Partial ratings are merged with the stored ones.
+// PUT /api/reviews/:id  (HR, Admin)  -> ratings / feedback / goals
 export const updateReview = async (req, res) => {
-  const { ratings, feedback, goals } = req.body;
+  const { ratings, feedback, goals } = req.body ?? {};
+  if (ratings === undefined && feedback === undefined && goals === undefined) {
+    throw badRequest('Provide at least one of: ratings, feedback, goals');
+  }
 
-  const review = await Review.findById(req.params.id).lean();
+  const review = await Review.findById(req.params.id);
   if (!review) throw notFound('Review not found');
 
-  const update = {};
+  const changed = [];
   if (ratings !== undefined) {
-    if (!ratings || typeof ratings !== 'object' || Array.isArray(ratings)) throw badRequest('ratings must be an object');
-    update.ratings = parseRatings({ ...review.ratings, ...ratings });
-    update.overallRating = overallOf(update.ratings); // recomputed because ratings changed
+    const merged = { ...review.ratings.toObject(), ...parseRatings(ratings, { partial: true }) };
+    review.ratings = merged;
+    review.overallRating = overall(merged);
+    changed.push('ratings');
   }
-  if (feedback !== undefined) update.feedback = parseFeedback(feedback);
-  if (goals !== undefined) update.goals = parseGoals(goals);
-  if (Object.keys(update).length === 0) {
-    throw badRequest('Nothing to update: send ratings, feedback and/or goals');
+  if (feedback !== undefined) {
+    review.feedback = parseText(feedback, 'feedback');
+    changed.push('feedback');
   }
+  if (goals !== undefined) {
+    review.goals = parseGoals(goals);
+    changed.push('goals');
+  }
+  // userId, reviewerId and period are never read from the body, so they cannot change.
 
-  const updated = await Review.findByIdAndUpdate(review._id, update, { new: true, runValidators: true });
-  if (!updated) throw notFound('Review not found');
-  return ok(res, updated, 'Review updated');
+  await review.save();
+
+  sendAudit({
+    actorId: req.user.id, actorRole: req.user.role, action: 'REVIEW_UPDATED',
+    resource: 'review', resourceId: review.id, method: req.method, path: req.originalUrl,
+    statusCode: 200, outcome: 'success', details: { employeeId: review.userId, fields: changed },
+  });
+  return ok(res, review, 'Review updated');
 };
 
 // DELETE /api/reviews/:id  (Admin only)  -> hard delete
@@ -148,17 +164,9 @@ export const deleteReview = async (req, res) => {
   if (!review) throw notFound('Review not found');
 
   sendAudit({
-    actorId: req.user.id,
-    actorRole: req.user.role,
-    action: 'REVIEW_DELETED',
-    resource: 'review',
-    resourceId: String(review._id),
-    method: req.method,
-    path: req.originalUrl,
-    statusCode: 200,
-    outcome: 'success',
-    details: { userId: review.userId, period: review.period },
+    actorId: req.user.id, actorRole: req.user.role, action: 'REVIEW_DELETED',
+    resource: 'review', resourceId: review.id, method: req.method, path: req.originalUrl,
+    statusCode: 200, outcome: 'success', details: { employeeId: review.userId, period: review.period },
   });
-
-  return ok(res, { id: String(review._id) }, 'Review deleted');
+  return ok(res, { id: review.id }, 'Review deleted');
 };

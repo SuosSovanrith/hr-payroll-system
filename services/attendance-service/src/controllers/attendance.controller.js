@@ -3,10 +3,37 @@
 import Attendance from '../models/Attendance.js';
 import { isStaff } from '../common/roles.js';
 import { ok, created } from '../common/response.js';
+import { badRequest, conflict, forbidden } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { STANDARD_WORK_HOURS, LATE_AFTER_HOUR, WORK_TIMEZONE } from '../config/constants.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
+
+const DATE_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
+
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD -> { date: { $gte, $lte } } (`date` is a plain string, so it compares correctly)
+const dateRange = ({ from, to }) => {
+  const range = {};
+  if (from !== undefined) {
+    if (typeof from !== 'string' || !DATE_RE.test(from)) throw badRequest('from must be YYYY-MM-DD');
+    range.$gte = from;
+  }
+  if (to !== undefined) {
+    if (typeof to !== 'string' || !DATE_RE.test(to)) throw badRequest('to must be YYYY-MM-DD');
+    range.$lte = to;
+  }
+  if (range.$gte && range.$lte && range.$gte > range.$lte) throw badRequest('from must not be after to');
+  return Object.keys(range).length ? { date: range } : {};
+};
+
+const findPage = async (filter, query) => {
+  const { page, limit, skip } = getPagination(query);
+  const [items, total] = await Promise.all([
+    Attendance.find(filter).sort({ date: -1, userId: 1 }).skip(skip).limit(limit),
+    Attendance.countDocuments(filter),
+  ]);
+  return { items, page, limit, total };
+};
 
 // Date parts as seen in WORK_TIMEZONE (not the server's UTC clock).
 const clockFormat = new Intl.DateTimeFormat('en-CA', {

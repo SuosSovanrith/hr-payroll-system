@@ -1,104 +1,113 @@
 // Leave Management Service. Models: LeaveRequest, LeaveBalance (both in ./models).
-import { badRequest, conflict, forbidden, notFound } from '../common/errors.js';
+// req.user = { id, role, email } is filled from the gateway headers.
+import LeaveRequest, { LEAVE_TYPES } from '../models/LeaveRequest.js';
+import LeaveBalance from '../models/LeaveBalance.js';
 import { ok, created } from '../common/response.js';
+import { badRequest, conflict, forbidden, notFound } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { sendAudit } from '../common/audit.js';
-import LeaveBalance from '../models/LeaveBalance.js';
-import LeaveRequest, { LEAVE_TYPES } from '../models/LeaveRequest.js';
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const STATUSES = ['pending', 'approved', 'rejected', 'cancelled'];
-const DECISIONS = ['approved', 'rejected'];
+const BALANCE_TYPES = ['annual', 'sick']; // unpaid leave has no balance
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-// Finds this user's balance for a year, creating it with the schema defaults (14 annual / 7 sick) the first time.
-const getOrCreateBalance = (userId, year) =>
-  LeaveBalance.findOneAndUpdate(
-    { userId, year },
-    { $setOnInsert: { userId, year } },
-    { upsert: true, new: true },
-  );
-
-// Parses a date and cuts it to midnight UTC so "2026-10-20" and "2026-10-20T15:00:00Z" count as the same day.
-// Returns null when the value is not a valid date.
-const toUtcDay = (value) => {
+// Parse "YYYY-MM-DD" or any ISO string into a Date at 00:00 UTC of that calendar day.
+const toUtcDay = (value, field) => {
   const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return null;
+  if (typeof value !== 'string' || Number.isNaN(d.getTime())) throw badRequest(`${field} must be a valid date`);
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 };
 
-// Reads the optional ?status= filter; an unknown value is a 400 instead of a silently empty list.
-const parseStatus = (value) => {
-  if (value === undefined || value === '') return undefined;
-  if (!STATUSES.includes(value)) {
-    throw badRequest('Invalid status filter', [{ field: 'status', message: `must be one of: ${STATUSES.join(', ')}` }]);
+// Returns the user's balance for a year, creating it with the schema defaults the first time.
+const getOrCreateBalance = async (userId, year) => {
+  const run = () =>
+    LeaveBalance.findOneAndUpdate(
+      { userId, year },
+      { $setOnInsert: { userId, year } },
+      { upsert: true, new: true, setDefaultsOnInsert: true },
+    );
+  try {
+    return await run();
+  } catch (err) {
+    if (err?.code === 11000) return run(); // two requests created it at the same moment: read the winner
+    throw err;
   }
-  return value;
 };
 
-// POST /api/leaves  (any logged-in user)   Body: { type, startDate, endDate, reason }
-// Validates, rejects overlaps (409) and insufficient balance (400), then creates a 'pending' request (201).
-// The balance is only deducted later, when HR/Admin approves.
-export const requestLeave = async (req, res) => {
-  const { type, startDate, endDate, reason } = req.body; // whitelist: nothing else from the body is used
+const bucketView = (b) => ({ allocated: b.allocated, used: b.used, remaining: b.allocated - b.used });
 
-  if (!LEAVE_TYPES.includes(type)) {
-    throw badRequest('Invalid leave type', [{ field: 'type', message: `must be one of: ${LEAVE_TYPES.join(', ')}` }]);
+// POST /api/leaves  (any logged-in user)   Body: { type, startDate, endDate, reason }
+export const requestLeave = async (req, res) => {
+  const { type, startDate, endDate, reason } = req.body;
+
+  if (!LEAVE_TYPES.includes(type)) throw badRequest(`type must be one of: ${LEAVE_TYPES.join(', ')}`);
+  if (reason !== undefined && typeof reason !== 'string') throw badRequest('reason must be a string');
+
+  const start = toUtcDay(startDate, 'startDate');
+  const end = toUtcDay(endDate, 'endDate');
+  if (end < start) throw badRequest('endDate must not be before startDate');
+
+  const days = Math.round((end - start) / MS_PER_DAY) + 1; // inclusive
+  const year = start.getUTCFullYear();
+
+  // Balance is tracked per calendar year, so annual/sick requests must stay inside one year.
+  if (BALANCE_TYPES.includes(type) && end.getUTCFullYear() !== year) {
+    throw badRequest('Annual and sick leave cannot span two calendar years. Submit one request per year');
   }
 
-  const start = toUtcDay(startDate);
-  const end = toUtcDay(endDate);
-  if (!start || !end) throw badRequest('startDate and endDate must be valid dates');
-  if (end < start) throw badRequest('endDate must be on or after startDate');
-
-  const days = Math.round((end - start) / MS_PER_DAY) + 1; // inclusive: same day = 1
-
-  // Two ranges overlap when each one starts on or before the other one ends.
-  const overlapping = await LeaveRequest.findOne({
+  const overlap = await LeaveRequest.exists({
     userId: req.user.id,
     status: { $in: ['pending', 'approved'] },
     startDate: { $lte: end },
     endDate: { $gte: start },
   });
-  if (overlapping) throw conflict('This overlaps with another pending or approved leave request');
+  if (overlap) throw conflict('You already have a pending or approved leave request in this period');
 
-  // Unpaid leave has no balance, so only annual/sick are checked.
-  if (type !== 'unpaid') {
-    const balance = await getOrCreateBalance(req.user.id, start.getUTCFullYear());
+  if (BALANCE_TYPES.includes(type)) {
+    const balance = await getOrCreateBalance(req.user.id, year);
     const remaining = balance[type].allocated - balance[type].used;
     if (remaining < days) {
-      throw badRequest(`Insufficient leave balance: ${days} day(s) requested, ${remaining} ${type} day(s) remaining`);
+      throw badRequest(`Insufficient ${type} leave balance: ${remaining} day(s) remaining, ${days} requested`);
     }
   }
 
-  const leave = await LeaveRequest.create({
-    userId: req.user.id, // from the gateway headers, never from the body
-    type,
-    startDate: start,
-    endDate: end,
-    days,
-    reason,
+  const request = await LeaveRequest.create({
+    userId: req.user.id, type, startDate: start, endDate: end, days, reason: reason?.trim(), status: 'pending',
   });
-  return created(res, leave);
+  return created(res, request, 'Leave request submitted');
 };
 
 // GET /api/leaves/me  (any logged-in user)  -> own requests, newest first, optional ?status=
 export const myLeaves = async (req, res) => {
+  const { status } = req.query;
   const filter = { userId: req.user.id };
-  const status = parseStatus(req.query.status);
-  if (status) filter.status = status;
+  if (status !== undefined) {
+    if (!STATUSES.includes(status)) throw badRequest(`status must be one of: ${STATUSES.join(', ')}`);
+    filter.status = status;
+  }
 
-  const leaves = await LeaveRequest.find(filter).sort({ createdAt: -1 });
-  return ok(res, leaves);
+  const { page, limit, skip } = getPagination(req.query);
+  const [items, total] = await Promise.all([
+    LeaveRequest.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
+    LeaveRequest.countDocuments(filter),
+  ]);
+  return ok(res, { items, page, limit, total });
 };
 
-// GET /api/leaves  (HR, Admin)  -> all requests, filters ?status= ?userId=, paginated
+// GET /api/leaves  (HR, Admin)  -> all requests, filters ?status= ?userId=
 export const listLeaves = async (req, res) => {
-  const { page, limit, skip } = getPagination(req.query);
+  const { status, userId } = req.query;
   const filter = {};
-  const status = parseStatus(req.query.status);
-  if (status) filter.status = status;
-  if (req.query.userId) filter.userId = String(req.query.userId);
+  if (status !== undefined) {
+    if (!STATUSES.includes(status)) throw badRequest(`status must be one of: ${STATUSES.join(', ')}`);
+    filter.status = status;
+  }
+  if (userId !== undefined) {
+    if (typeof userId !== 'string' || !userId.trim()) throw badRequest('userId must be a string');
+    filter.userId = userId.trim();
+  }
 
+  const { page, limit, skip } = getPagination(req.query);
   const [items, total] = await Promise.all([
     LeaveRequest.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit),
     LeaveRequest.countDocuments(filter),
@@ -107,82 +116,77 @@ export const listLeaves = async (req, res) => {
 };
 
 // PATCH /api/leaves/:id/review  (HR, Admin)   Body: { decision: 'approved' | 'rejected', comment }
-// Only pending requests, never your own. Approving annual/sick leave deducts the balance.
 export const reviewLeave = async (req, res) => {
   const { decision, comment } = req.body;
-  if (!DECISIONS.includes(decision)) {
-    throw badRequest('Invalid decision', [{ field: 'decision', message: `must be one of: ${DECISIONS.join(', ')}` }]);
-  }
+  if (!['approved', 'rejected'].includes(decision)) throw badRequest('decision must be approved or rejected');
+  if (comment !== undefined && typeof comment !== 'string') throw badRequest('comment must be a string');
 
-  const leave = await LeaveRequest.findById(req.params.id);
-  if (!leave) throw notFound('Leave request not found');
-  if (leave.status !== 'pending') throw conflict(`Only pending requests can be reviewed (this one is ${leave.status})`);
-  if (leave.userId === req.user.id) throw forbidden('You cannot review your own leave request');
+  const existing = await LeaveRequest.findById(req.params.id);
+  if (!existing) throw notFound('Leave request not found');
+  if (existing.status !== 'pending') throw conflict(`Only pending requests can be reviewed (this one is ${existing.status})`);
+  if (existing.userId === req.user.id) throw forbidden('You cannot review your own leave request');
 
-  // Balances are kept per year of the start date, the same year requestLeave checked.
-  const deduct = decision === 'approved' && leave.type !== 'unpaid';
-  const year = leave.startDate.getUTCFullYear();
+  // Move pending -> decision atomically, so two reviewers cannot both decide the same request.
+  const request = await LeaveRequest.findOneAndUpdate(
+    { _id: existing._id, status: 'pending' },
+    { $set: { status: decision, reviewedBy: req.user.id, reviewComment: comment?.trim() } },
+    { new: true },
+  );
+  if (!request) throw conflict('This request was already reviewed');
 
-  if (deduct) {
-    const balance = await getOrCreateBalance(leave.userId, year);
-    const remaining = balance[leave.type].allocated - balance[leave.type].used;
-    if (remaining < leave.days) {
-      throw conflict(`Cannot approve: ${leave.days} day(s) requested, only ${remaining} ${leave.type} day(s) remaining`);
+  if (decision === 'approved' && BALANCE_TYPES.includes(request.type)) {
+    const year = request.startDate.getUTCFullYear();
+    await getOrCreateBalance(request.userId, year);
+
+    const field = request.type; // 'annual' | 'sick'
+    const deducted = await LeaveBalance.findOneAndUpdate(
+      {
+        userId: request.userId,
+        year,
+        // never let `used` exceed `allocated`, even if balance changed since the request was made
+        $expr: { $lte: [{ $add: [`$${field}.used`, request.days] }, `$${field}.allocated`] },
+      },
+      { $inc: { [`${field}.used`]: request.days } },
+      { new: true },
+    );
+    if (!deducted) {
+      // Roll the decision back so the request can be reviewed again (or rejected).
+      await LeaveRequest.updateOne(
+        { _id: request._id },
+        { $set: { status: 'pending' }, $unset: { reviewedBy: '', reviewComment: '' } },
+      );
+      throw conflict(`Cannot approve: not enough ${field} leave balance left for ${request.days} day(s)`);
     }
   }
 
-  // Atomic status change: if two reviewers click at once, only one gets past 'pending' (no double deduction).
-  const reviewed = await LeaveRequest.findOneAndUpdate(
-    { _id: leave._id, status: 'pending' },
-    { status: decision, reviewedBy: req.user.id, reviewComment: comment },
-    { new: true, runValidators: true },
-  );
-  if (!reviewed) throw conflict('This request was already reviewed');
-
-  if (deduct) {
-    await LeaveBalance.updateOne(
-      { userId: leave.userId, year },
-      { $inc: { [`${leave.type}.used`]: leave.days } }, // $inc is atomic
-    );
-  }
-
   sendAudit({
-    actorId: req.user.id,
-    actorRole: req.user.role,
+    actorId: req.user.id, actorRole: req.user.role,
     action: decision === 'approved' ? 'LEAVE_APPROVED' : 'LEAVE_REJECTED',
-    resource: 'leave_request',
-    resourceId: String(reviewed._id),
-    method: req.method,
-    path: req.originalUrl,
-    statusCode: 200,
-    outcome: 'success',
-    details: { userId: reviewed.userId, type: reviewed.type, days: reviewed.days, comment: reviewed.reviewComment },
+    resource: 'leave', resourceId: request.id, method: req.method, path: req.originalUrl,
+    statusCode: 200, outcome: 'success',
+    details: { employeeId: request.userId, type: request.type, days: request.days },
   });
-
-  return ok(res, reviewed, `Leave request ${decision}`);
+  return ok(res, request, `Leave request ${decision}`);
 };
 
-// DELETE /api/leaves/:id  (owner only)  -> cancel a pending request (soft: the record is kept)
+// DELETE /api/leaves/:id  (owner only)  -> cancel while pending
 export const cancelLeave = async (req, res) => {
-  const leave = await LeaveRequest.findById(req.params.id);
-  if (!leave) throw notFound('Leave request not found');
-  if (leave.userId !== req.user.id) throw forbidden('You can only cancel your own leave request');
-  if (leave.status !== 'pending') throw conflict(`Only pending requests can be cancelled (this one is ${leave.status})`);
+  const request = await LeaveRequest.findById(req.params.id);
+  if (!request) throw notFound('Leave request not found');
+  if (request.userId !== req.user.id) throw forbidden('You can only cancel your own leave requests');
+  if (request.status !== 'pending') throw conflict(`Only pending requests can be cancelled (this one is ${request.status})`);
 
   const cancelled = await LeaveRequest.findOneAndUpdate(
-    { _id: leave._id, status: 'pending' },
-    { status: 'cancelled' },
-    { new: true },
+    { _id: request._id, status: 'pending' }, { $set: { status: 'cancelled' } }, { new: true },
   );
-  if (!cancelled) throw conflict('This request is no longer pending');
+  if (!cancelled) throw conflict('This request was just reviewed and can no longer be cancelled');
+
   return ok(res, cancelled, 'Leave request cancelled');
 };
 
 // GET /api/leaves/balance/me  (any logged-in user)
-// Creates the balance with the schema defaults on first use, then returns { year, annual, sick } with `remaining`.
 export const myBalance = async (req, res) => {
-  const year = new Date().getFullYear();
+  const year = new Date().getUTCFullYear();
   const balance = await getOrCreateBalance(req.user.id, year);
-  const bucket = (b) => ({ allocated: b.allocated, used: b.used, remaining: b.allocated - b.used });
-  return ok(res, { year, annual: bucket(balance.annual), sick: bucket(balance.sick) });
+  return ok(res, { year, annual: bucketView(balance.annual), sick: bucketView(balance.sick) });
 };
