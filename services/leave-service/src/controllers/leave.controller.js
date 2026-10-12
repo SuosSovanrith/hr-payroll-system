@@ -1,5 +1,15 @@
 // Leave Management Service. Models: LeaveRequest, LeaveBalance (both in ./models).
 import { notImplemented } from '../common/errors.js';
+import { ok } from '../common/response.js';
+import LeaveBalance from '../models/LeaveBalance.js';
+
+// Finds this user's balance for a year, creating it with the schema defaults (14 annual / 7 sick) the first time.
+const getOrCreateBalance = (userId, year) =>
+  LeaveBalance.findOneAndUpdate(
+    { userId, year },
+    { $setOnInsert: { userId, year } },
+    { upsert: true, new: true },
+  );
 
 // TODO [Member 2] POST /api/leaves  (any logged-in user)   Body: { type, startDate, endDate, reason }
 //  1. type must be in LEAVE_TYPES; endDate >= startDate; otherwise 400.
@@ -40,10 +50,11 @@ export const cancelLeave = async (req, res) => {
   throw notImplemented('DELETE /api/leaves/:id');
 };
 
-// TODO [Member 2] GET /api/leaves/balance/me  (any logged-in user)
-//  1. findOneAndUpdate({ userId, year }, { $setOnInsert: { userId, year } }, { upsert: true, new: true })
-//     creates the balance with the schema defaults the first time.
-//  2. Respond { year, annual: { allocated, used, remaining }, sick: { allocated, used, remaining } }.
+// GET /api/leaves/balance/me  (any logged-in user)
+// Creates the balance with the schema defaults on first use, then returns { year, annual, sick } with `remaining`.
 export const myBalance = async (req, res) => {
-  throw notImplemented('GET /api/leaves/balance/me');
+  const year = new Date().getFullYear();
+  const balance = await getOrCreateBalance(req.user.id, year);
+  const bucket = (b) => ({ allocated: b.allocated, used: b.used, remaining: b.allocated - b.used });
+  return ok(res, { year, annual: bucket(balance.annual), sick: bucket(balance.sick) });
 };
