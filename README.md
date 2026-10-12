@@ -396,12 +396,12 @@ Formula (`config/payrollRules.js`, ✅ already implemented): `hourly = base/160`
 
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
-| PUT | `/api/payroll/salary/:userId` | Staff | Body `{ baseSalary, currency? }` (upsert) | 🔲 |
-| GET | `/api/payroll/salary/:userId` | Owner / Staff | Salary structure | 🔲 |
-| POST | `/api/payroll/generate` | Staff | Body `{ userId, month }`. Calls Employee + Attendance internally. 409 if already generated | 🔲 |
-| GET | `/api/payroll/payslips/me` | Any | Own payslips (`?month=`) | 🔲 |
-| GET | `/api/payroll/payslips` | Staff | All payslips (`?month=&userId=`) | 🔲 |
-| GET | `/api/payroll/payslips/:id` | Owner / Staff | Payslip detail | 🔲 |
+| PUT | `/api/payroll/salary/:userId` | Staff | Body `{ baseSalary, currency? }` (upsert) | ✅ |
+| GET | `/api/payroll/salary/:userId` | Owner / Staff | Salary structure | ✅ |
+| POST | `/api/payroll/generate` | Staff | Body `{ userId, month }`. Calls Employee + Attendance internally. 409 if already generated | ✅ |
+| GET | `/api/payroll/payslips/me` | Any | Own payslips (`?month=`) | ✅ |
+| GET | `/api/payroll/payslips` | Staff | All payslips (`?month=&userId=`) | ✅ |
+| GET | `/api/payroll/payslips/:id` | Owner / Staff | Payslip detail | ✅ |
 
 ### 7.9 Audit & Logging Service (3008, DB `hr_audit`) — Member 3
 
