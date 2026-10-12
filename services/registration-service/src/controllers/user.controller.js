@@ -1,5 +1,3 @@
-// import { notImplemented } from '../common/errors.js';
-
 import User from '../models/User.js';
 import { ALL_ROLES, ROLES } from '../common/roles.js';
 import { ok } from '../common/response.js';
@@ -7,7 +5,7 @@ import { badRequest, notFound } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { sendAudit } from '../common/audit.js';
 
-// TODO [Common] GET /api/users  (HR, Admin)
+// DONE [Common] GET /api/users  (HR, Admin)
 //  1. Optional filters: ?role=, ?isActive=true|false, ?search= (email or fullName, case-insensitive regex).
 //  2. Pagination: const { page, limit, skip } = getPagination(req.query)  (common/pagination.js).
 //  3. User.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit); respond ok(res, { items, page, limit, total }).
@@ -41,7 +39,7 @@ export const listUsers = async (req, res) => {
   return ok(res, { items, page, limit, total });
 };
 
-// TODO [Common] PATCH /api/users/:id/role  (Admin only)
+// DONE [Common] PATCH /api/users/:id/role  (Admin only)
 //  1. Body: { role } must be in ALL_ROLES -> else 400. User not found -> 404.
 //  2. An admin must not be able to demote THEMSELVES (req.user.id === req.params.id) -> 400.
 //  3. Update, then sendAudit({ action: 'ROLE_CHANGED', actorId, resourceId, details: { from, to }, ... }).

@@ -12,7 +12,7 @@ import { lbInfo } from './routes/lbInfo.js';
 import { errorHandler } from './common/errorHandler.js';
 
 const app = express();
-app.set('trust proxy', true); // we sit behind Nginx: req.ip = real client IP
+app.set('trust proxy', 1); // exactly one proxy (Nginx) in front: req.ip = the IP Nginx saw, not a client-supplied one
 
 // Tell the client which gateway instance answered (visible in Postman response headers).
 app.use((req, res, next) => {

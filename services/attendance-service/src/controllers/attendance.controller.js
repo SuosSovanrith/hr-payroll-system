@@ -3,9 +3,10 @@
 import Attendance from '../models/Attendance.js';
 import { isStaff } from '../common/roles.js';
 import { ok, created } from '../common/response.js';
-import { badRequest, conflict, forbidden } from '../common/errors.js';
+import { badRequest, conflict, forbidden, notFound } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
-import { STANDARD_WORK_HOURS, LATE_AFTER_HOUR, WORK_TIMEZONE } from '../config/constants.js';
+import { sendAudit } from '../common/audit.js';
+import { STANDARD_WORK_HOURS, LATE_AFTER_HOUR, MAX_SHIFT_HOURS, WORK_TIMEZONE } from '../config/constants.js';
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -59,25 +60,84 @@ export const clockIn = async (req, res) => {
   return created(res, record, 'Clocked in');
 };
 
+// Sets clockOut and derives totalHours / overtimeHours / status.
+// Shared by clock-out and by HR corrections so both follow the same rules.
+const closeShift = (record, clockOutAt) => {
+  const totalHours = round2((clockOutAt - record.clockIn) / 3600000);
+  record.clockOut = clockOutAt;
+  record.totalHours = totalHours;
+  record.overtimeHours = round2(Math.max(0, totalHours - STANDARD_WORK_HOURS));
+  record.status = localHour(record.clockIn) >= LATE_AFTER_HOUR ? 'late' : 'present';
+};
+
 // [DONE - Member 1] POST /api/attendance/clock-out  (any logged-in user)   Body (optional): { workLog }
+// Closes the user's latest OPEN shift (so a night shift 22:00 -> 06:00 works across midnight).
 export const clockOut = async (req, res) => {
   const now = new Date();
   const { workLog } = req.body ?? {};
   if (workLog !== undefined && typeof workLog !== 'string') throw badRequest('workLog must be a string');
 
-  const record = await Attendance.findOne({ userId: req.user.id, date: todayString(now) });
-  if (!record) throw badRequest('You have not clocked in today. Clock in first');
-  if (record.clockOut) throw conflict('You have already clocked out today');
+  const record = await Attendance.findOne({ userId: req.user.id, clockOut: null }).sort({ date: -1 });
+  if (!record) {
+    const closedToday = await Attendance.exists({ userId: req.user.id, date: todayString(now) });
+    throw closedToday ? conflict('You have already clocked out today') : badRequest('You have not clocked in. Clock in first');
+  }
 
-  const totalHours = round2((now - record.clockIn) / 3600000);
-  record.clockOut = now;
-  record.totalHours = totalHours;
-  record.overtimeHours = round2(Math.max(0, totalHours - STANDARD_WORK_HOURS));
-  record.status = localHour(record.clockIn) >= LATE_AFTER_HOUR ? 'late' : 'present';
+  // Forgotten clock-out: refuse to invent 30+ hours of pay. HR fixes it with PUT /api/attendance/:id.
+  const hoursOpen = (now - record.clockIn) / 3600000;
+  if (hoursOpen > MAX_SHIFT_HOURS) {
+    throw conflict(`Your shift on ${record.date} was never closed (open ${round2(hoursOpen)} h). Ask HR to correct it`);
+  }
+
+  closeShift(record, now);
   if (workLog) record.workLog = workLog.trim();
 
   await record.save();
   return ok(res, record, 'Clocked out');
+};
+
+// [NEW] PUT /api/attendance/:id  (HR, Admin)   Body: { clockIn?, clockOut?, workLog? }  (ISO date-times)
+// Fixes a forgotten or wrong clock-in/out. Totals, overtime and status are recalculated.
+const parseDateTime = (value, field) => {
+  const d = new Date(value);
+  if (typeof value !== 'string' || Number.isNaN(d.getTime())) throw badRequest(`${field} must be a valid ISO date-time`);
+  return d;
+};
+
+export const correctAttendance = async (req, res) => {
+  const { clockIn, clockOut, workLog } = req.body ?? {};
+  if (clockIn === undefined && clockOut === undefined && workLog === undefined) {
+    throw badRequest('Provide at least one of: clockIn, clockOut, workLog');
+  }
+  if (workLog !== undefined && typeof workLog !== 'string') throw badRequest('workLog must be a string');
+
+  const record = await Attendance.findById(req.params.id);
+  if (!record) throw notFound('Attendance record not found');
+
+  const before = { clockIn: record.clockIn, clockOut: record.clockOut, totalHours: record.totalHours };
+
+  if (clockIn !== undefined) {
+    record.clockIn = parseDateTime(clockIn, 'clockIn');
+    record.date = todayString(record.clockIn); // a duplicate (userId, date) is rejected by the unique index (409)
+  }
+  if (clockOut !== undefined) record.clockOut = parseDateTime(clockOut, 'clockOut');
+  if (workLog !== undefined) record.workLog = workLog.trim();
+
+  if (record.clockOut) {
+    const hours = (record.clockOut - record.clockIn) / 3600000;
+    if (hours <= 0) throw badRequest('clockOut must be after clockIn');
+    if (hours > MAX_SHIFT_HOURS) throw badRequest(`A shift cannot be longer than ${MAX_SHIFT_HOURS} hours`);
+    closeShift(record, record.clockOut);
+  }
+  record.correctedBy = req.user.id;
+  await record.save();
+
+  sendAudit({
+    actorId: req.user.id, actorRole: req.user.role, action: 'ATTENDANCE_CORRECTED',
+    resource: 'attendance', resourceId: record.id, method: req.method, path: req.originalUrl,
+    statusCode: 200, outcome: 'success', details: { employeeId: record.userId, before, after: { clockIn: record.clockIn, clockOut: record.clockOut, totalHours: record.totalHours } },
+  });
+  return ok(res, record, 'Attendance corrected');
 };
 
 // [DONE - Member 1] GET /api/attendance/me  (any logged-in user)

@@ -1,0 +1,182 @@
+diff --git a/nginx/nginx.conf b/nginx/nginx.conf
+index f44b2c9..253f3d7 100644
+--- a/nginx/nginx.conf
++++ b/nginx/nginx.conf
+@@ -15,7 +15,8 @@ http {
+       proxy_pass http://gateways;
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+-      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
++      # Overwrite (do not append) so a client cannot forge its IP in audit logs
++      proxy_set_header X-Forwarded-For $remote_addr;
+       proxy_set_header X-Forwarded-Proto $scheme;
+ 
+       # Show which gateway container handled the request (visible in Postman response headers)
+diff --git a/services/api-gateway/src/app.js b/services/api-gateway/src/app.js
+index 8711d52..e4fc4f3 100644
+--- a/services/api-gateway/src/app.js
++++ b/services/api-gateway/src/app.js
+@@ -12,7 +12,7 @@ import { lbInfo } from './routes/lbInfo.js';
+ import { errorHandler } from './common/errorHandler.js';
+ 
+ const app = express();
+-app.set('trust proxy', true); // we sit behind Nginx: req.ip = real client IP
++app.set('trust proxy', 1); // exactly one proxy (Nginx) in front: req.ip = the IP Nginx saw, not a client-supplied one
+ 
+ // Tell the client which gateway instance answered (visible in Postman response headers).
+ app.use((req, res, next) => {
+diff --git a/services/api-gateway/src/config/routes.js b/services/api-gateway/src/config/routes.js
+index f098fb7..d5e267a 100644
+--- a/services/api-gateway/src/config/routes.js
++++ b/services/api-gateway/src/config/routes.js
+@@ -37,6 +37,7 @@ export const routeTable = [
+   { method: 'GET', path: '/api/attendance/me', roles: ANY, service: 'attendance' },
+   { method: 'GET', path: '/api/attendance/summary/:userId', roles: ANY, service: 'attendance' }, // service: self or staff
+   { method: 'GET', path: '/api/attendance', roles: STAFF, service: 'attendance' },
++  { method: 'PUT', path: '/api/attendance/:id', roles: STAFF, service: 'attendance' }, // HR fixes a forgotten clock-out
+ 
+   // ---- Leave Service ----
+   { method: 'POST', path: '/api/leaves', roles: ANY, service: 'leave' },
+diff --git a/services/attendance-service/src/config/constants.js b/services/attendance-service/src/config/constants.js
+index 73be472..0fe55b9 100644
+--- a/services/attendance-service/src/config/constants.js
++++ b/services/attendance-service/src/config/constants.js
+@@ -2,4 +2,6 @@
+ export const STANDARD_WORK_HOURS = 8; // hours beyond this per day count as overtime
+ export const LATE_AFTER_HOUR = 9; // clock-in at or after 09:00 (WORK_TIMEZONE) => status "late"
+ 
++export const MAX_SHIFT_HOURS = 16; // a shift open longer than this is treated as "forgotten": only HR can fix it
++
+ export const WORK_TIMEZONE = 'Asia/Phnom_Penh'; // used to decide "today" and the late cutoff
+diff --git a/services/attendance-service/src/controllers/attendance.controller.js b/services/attendance-service/src/controllers/attendance.controller.js
+index 15e2d56..eb6426b 100644
+--- a/services/attendance-service/src/controllers/attendance.controller.js
++++ b/services/attendance-service/src/controllers/attendance.controller.js
+@@ -3,9 +3,10 @@
+ import Attendance from '../models/Attendance.js';
+ import { isStaff } from '../common/roles.js';
+ import { ok, created } from '../common/response.js';
+-import { badRequest, conflict, forbidden } from '../common/errors.js';
++import { badRequest, conflict, forbidden, notFound } from '../common/errors.js';
+ import { getPagination } from '../common/pagination.js';
+-import { STANDARD_WORK_HOURS, LATE_AFTER_HOUR, WORK_TIMEZONE } from '../config/constants.js';
++import { sendAudit } from '../common/audit.js';
++import { STANDARD_WORK_HOURS, LATE_AFTER_HOUR, MAX_SHIFT_HOURS, WORK_TIMEZONE } from '../config/constants.js';
+ 
+ const round2 = (n) => Math.round(n * 100) / 100;
+ 
+@@ -59,27 +60,86 @@ export const clockIn = async (req, res) => {
+   return created(res, record, 'Clocked in');
+ };
+ 
++// Sets clockOut and derives totalHours / overtimeHours / status.
++// Shared by clock-out and by HR corrections so both follow the same rules.
++const closeShift = (record, clockOutAt) => {
++  const totalHours = round2((clockOutAt - record.clockIn) / 3600000);
++  record.clockOut = clockOutAt;
++  record.totalHours = totalHours;
++  record.overtimeHours = round2(Math.max(0, totalHours - STANDARD_WORK_HOURS));
++  record.status = localHour(record.clockIn) >= LATE_AFTER_HOUR ? 'late' : 'present';
++};
++
+ // [DONE - Member 1] POST /api/attendance/clock-out  (any logged-in user)   Body (optional): { workLog }
++// Closes the user's latest OPEN shift (so a night shift 22:00 -> 06:00 works across midnight).
+ export const clockOut = async (req, res) => {
+   const now = new Date();
+   const { workLog } = req.body ?? {};
+   if (workLog !== undefined && typeof workLog !== 'string') throw badRequest('workLog must be a string');
+ 
+-  const record = await Attendance.findOne({ userId: req.user.id, date: todayString(now) });
+-  if (!record) throw badRequest('You have not clocked in today. Clock in first');
+-  if (record.clockOut) throw conflict('You have already clocked out today');
++  const record = await Attendance.findOne({ userId: req.user.id, clockOut: null }).sort({ date: -1 });
++  if (!record) {
++    const closedToday = await Attendance.exists({ userId: req.user.id, date: todayString(now) });
++    throw closedToday ? conflict('You have already clocked out today') : badRequest('You have not clocked in. Clock in first');
++  }
++
++  // Forgotten clock-out: refuse to invent 30+ hours of pay. HR fixes it with PUT /api/attendance/:id.
++  const hoursOpen = (now - record.clockIn) / 3600000;
++  if (hoursOpen > MAX_SHIFT_HOURS) {
++    throw conflict(`Your shift on ${record.date} was never closed (open ${round2(hoursOpen)} h). Ask HR to correct it`);
++  }
+ 
+-  const totalHours = round2((now - record.clockIn) / 3600000);
+-  record.clockOut = now;
+-  record.totalHours = totalHours;
+-  record.overtimeHours = round2(Math.max(0, totalHours - STANDARD_WORK_HOURS));
+-  record.status = localHour(record.clockIn) >= LATE_AFTER_HOUR ? 'late' : 'present';
++  closeShift(record, now);
+   if (workLog) record.workLog = workLog.trim();
+ 
+   await record.save();
+   return ok(res, record, 'Clocked out');
+ };
+ 
++// [NEW] PUT /api/attendance/:id  (HR, Admin)   Body: { clockIn?, clockOut?, workLog? }  (ISO date-times)
++// Fixes a forgotten or wrong clock-in/out. Totals, overtime and status are recalculated.
++const parseDateTime = (value, field) => {
++  const d = new Date(value);
++  if (typeof value !== 'string' || Number.isNaN(d.getTime())) throw badRequest(`${field} must be a valid ISO date-time`);
++  return d;
++};
++
++export const correctAttendance = async (req, res) => {
++  const { clockIn, clockOut, workLog } = req.body ?? {};
++  if (clockIn === undefined && clockOut === undefined && workLog === undefined) {
++    throw badRequest('Provide at least one of: clockIn, clockOut, workLog');
++  }
++  if (workLog !== undefined && typeof workLog !== 'string') throw badRequest('workLog must be a string');
++
++  const record = await Attendance.findById(req.params.id);
++  if (!record) throw notFound('Attendance record not found');
++
++  const before = { clockIn: record.clockIn, clockOut: record.clockOut, totalHours: record.totalHours };
++
++  if (clockIn !== undefined) {
++    record.clockIn = parseDateTime(clockIn, 'clockIn');
++    record.date = todayString(record.clockIn); // a duplicate (userId, date) is rejected by the unique index (409)
++  }
++  if (clockOut !== undefined) record.clockOut = parseDateTime(clockOut, 'clockOut');
++  if (workLog !== undefined) record.workLog = workLog.trim();
++
++  if (record.clockOut) {
++    const hours = (record.clockOut - record.clockIn) / 3600000;
++    if (hours <= 0) throw badRequest('clockOut must be after clockIn');
++    if (hours > MAX_SHIFT_HOURS) throw badRequest(`A shift cannot be longer than ${MAX_SHIFT_HOURS} hours`);
++    closeShift(record, record.clockOut);
++  }
++  record.correctedBy = req.user.id;
++  await record.save();
++
++  sendAudit({
++    actorId: req.user.id, actorRole: req.user.role, action: 'ATTENDANCE_CORRECTED',
++    resource: 'attendance', resourceId: record.id, method: req.method, path: req.originalUrl,
++    statusCode: 200, outcome: 'success', details: { employeeId: record.userId, before, after: { clockIn: record.clockIn, clockOut: record.clockOut, totalHours: record.totalHours } },
++  });
++  return ok(res, record, 'Attendance corrected');
++};
++
+ // [DONE - Member 1] GET /api/attendance/me  (any logged-in user)
+ export const getMyAttendance = async (req, res) => {
+   const filter = { userId: req.user.id, ...dateRange(req.query) };
+diff --git a/services/attendance-service/src/routes/attendance.routes.js b/services/attendance-service/src/routes/attendance.routes.js
+index ec7c2ac..48a6893 100644
+--- a/services/attendance-service/src/routes/attendance.routes.js
++++ b/services/attendance-service/src/routes/attendance.routes.js
+@@ -1,7 +1,7 @@
+ import { Router } from 'express';
+ import { requireAuth, requireRole } from '../common/requireRole.js';
+ import { STAFF } from '../common/roles.js';
+-import { clockIn, clockOut, getMyAttendance, listAttendance, getSummary } from '../controllers/attendance.controller.js';
++import { clockIn, clockOut, getMyAttendance, listAttendance, getSummary, correctAttendance } from '../controllers/attendance.controller.js';
+ 
+ const router = Router();
+ 
+@@ -11,5 +11,6 @@ router.post('/clock-out', requireAuth, clockOut);
+ router.get('/me', requireAuth, getMyAttendance);
+ router.get('/summary/:userId', requireAuth, getSummary);
+ router.get('/', requireRole(...STAFF), listAttendance);
++router.put('/:id', requireRole(...STAFF), correctAttendance);
+ 
+ export default router;

@@ -33,7 +33,7 @@ export const register = async (req, res) => {
   return created(res, user, 'Registration successful');
 };
 
-// TODO [Common] POST /api/auth/register/staff  (Admin only - gateway + route already enforce this)
+// DONE [Common] POST /api/auth/register/staff  (Admin only - gateway + route already enforce this)
 //  1. Body: { email, password, fullName, role }. Check `role` is one of ALL_ROLES (common/roles.js) -> else 400.
 //  2. Reuse createUser({ ..., role }) above, respond 201 with created(res, user).
 //  3. sendAudit({ actorId: req.user.id, actorRole: req.user.role, action: 'STAFF_ACCOUNT_CREATED', resourceId: user.id, ... }).

@@ -37,6 +37,7 @@ export const routeTable = [
   { method: 'GET', path: '/api/attendance/me', roles: ANY, service: 'attendance' },
   { method: 'GET', path: '/api/attendance/summary/:userId', roles: ANY, service: 'attendance' }, // service: self or staff
   { method: 'GET', path: '/api/attendance', roles: STAFF, service: 'attendance' },
+  { method: 'PUT', path: '/api/attendance/:id', roles: STAFF, service: 'attendance' }, // HR fixes a forgotten clock-out
 
   // ---- Leave Service ----
   { method: 'POST', path: '/api/leaves', roles: ANY, service: 'leave' },
