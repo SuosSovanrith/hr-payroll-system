@@ -372,12 +372,12 @@ JWT payload: `{ sub: <userId>, role, email, iat, exp }`, HS256, default 1 h.
 
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
-| POST | `/api/leaves` | Any | Body `{ type: annual\|sick\|unpaid, startDate, endDate, reason }`. Checks balance + overlap | 🔲 |
-| GET | `/api/leaves/me` | Any | Own requests (`?status=`) | 🔲 |
-| GET | `/api/leaves/balance/me` | Any | `{ year, annual, sick }` each `{ allocated, used, remaining }` (default 14 / 7) | 🔲 |
-| GET | `/api/leaves` | Staff | All requests (`?status=&userId=`) | 🔲 |
-| PATCH | `/api/leaves/:id/review` | Staff | Body `{ decision: approved\|rejected, comment }`. Deducts balance on approval; cannot review own request | 🔲 |
-| DELETE | `/api/leaves/:id` | Owner | Cancel while `pending` | 🔲 |
+| POST | `/api/leaves` | Any | Body `{ type: annual\|sick\|unpaid, startDate, endDate, reason }`. Checks balance + overlap | ✅ |
+| GET | `/api/leaves/me` | Any | Own requests (`?status=`) | ✅ |
+| GET | `/api/leaves/balance/me` | Any | `{ year, annual, sick }` each `{ allocated, used, remaining }` (default 14 / 7) | ✅ |
+| GET | `/api/leaves` | Staff | All requests (`?status=&userId=`) | ✅ |
+| PATCH | `/api/leaves/:id/review` | Staff | Body `{ decision: approved\|rejected, comment }`. Deducts balance on approval; cannot review own request | ✅ |
+| DELETE | `/api/leaves/:id` | Owner | Cancel while `pending` | ✅ |
 
 ### 7.7 Performance Review Service (3006, DB `hr_performance`) — Member 2
 
