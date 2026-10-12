@@ -3,7 +3,7 @@
 import User from '../models/User.js';
 import { ALL_ROLES, ROLES } from '../common/roles.js';
 import { ok } from '../common/response.js';
-import { badRequest, notImplemented } from '../common/errors.js';
+import { badRequest, notFound } from '../common/errors.js';
 import { getPagination } from '../common/pagination.js';
 import { sendAudit } from '../common/audit.js';
 

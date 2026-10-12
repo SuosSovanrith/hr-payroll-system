@@ -2,7 +2,7 @@ import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
 import { ROLES, ALL_ROLES } from '../common/roles.js';
 import { created } from '../common/response.js';
-import { badRequest, conflict, notImplemented } from '../common/errors.js';
+import { badRequest, conflict } from '../common/errors.js';
 import { sendAudit } from '../common/audit.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
