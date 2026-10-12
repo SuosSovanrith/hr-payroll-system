@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import User from '../models/User.js';
-import { ROLES } from '../common/roles.js';
+import { ROLES, ALL_ROLES } from '../common/roles.js';
 import { created } from '../common/response.js';
 import { badRequest, conflict, notImplemented } from '../common/errors.js';
 import { sendAudit } from '../common/audit.js';
@@ -20,7 +20,7 @@ const createUser = async ({ email, password, fullName, role }) => {
   return User.create({ email, passwordHash, fullName, role });
 };
 
-// ✅ DONE (reference implementation) - POST /api/auth/register  (public)
+// DONE (reference implementation) - POST /api/auth/register  (public)
 // Anyone can sign up, but the role is ALWAYS employee (ignore any "role" sent by the client).
 export const register = async (req, res) => {
   const { email, password, fullName } = req.body;
@@ -37,6 +37,20 @@ export const register = async (req, res) => {
 //  1. Body: { email, password, fullName, role }. Check `role` is one of ALL_ROLES (common/roles.js) -> else 400.
 //  2. Reuse createUser({ ..., role }) above, respond 201 with created(res, user).
 //  3. sendAudit({ actorId: req.user.id, actorRole: req.user.role, action: 'STAFF_ACCOUNT_CREATED', resourceId: user.id, ... }).
+
 export const registerStaff = async (req, res) => {
-  throw notImplemented('POST /api/auth/register/staff');
+  const { email, password, fullName, role } = req.body;
+
+  if (!ALL_ROLES.includes(role)) {
+    throw badRequest(`role must be one of: ${ALL_ROLES.join(', ')}`);
+  }
+
+  const user = await createUser({ email, password, fullName, role });
+
+  sendAudit({
+    actorId: req.user.id, actorRole: req.user.role, action: 'STAFF_ACCOUNT_CREATED',
+    resource: 'user', resourceId: user.id, method: req.method, path: req.originalUrl,
+    statusCode: 201, outcome: 'success', details: { email: user.email, role: user.role },
+  });
+  return created(res, user, 'Staff account created');
 };
