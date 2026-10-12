@@ -383,12 +383,12 @@ JWT payload: `{ sub: <userId>, role, email, iat, exp }`, HS256, default 1 h.
 
 | Method | Path | Access | Description | Status |
 |---|---|---|---|---|
-| POST | `/api/reviews` | Staff | Body `{ userId, period, ratings{quality,productivity,teamwork,communication: 1-5}, feedback, goals[] }`. Computes `overallRating`. 409 per (user, period) | 🔲 |
-| GET | `/api/reviews` | Staff | List (`?userId=&period=`) | 🔲 |
-| GET | `/api/reviews/me` | Any | Own reviews | 🔲 |
-| GET | `/api/reviews/:id` | Owner / Staff | Review detail | 🔲 |
-| PUT | `/api/reviews/:id` | Staff | Update ratings/feedback/goals | 🔲 |
-| DELETE | `/api/reviews/:id` | Admin | Delete | 🔲 |
+| POST | `/api/reviews` | Staff | Body `{ userId, period, ratings{quality,productivity,teamwork,communication: 1-5}, feedback, goals[] }`. Computes `overallRating`. 409 per (user, period) | ✅ |
+| GET | `/api/reviews` | Staff | List (`?userId=&period=`) | ✅ |
+| GET | `/api/reviews/me` | Any | Own reviews | ✅ |
+| GET | `/api/reviews/:id` | Owner / Staff | Review detail | ✅ |
+| PUT | `/api/reviews/:id` | Staff | Update ratings/feedback/goals | ✅ |
+| DELETE | `/api/reviews/:id` | Admin | Delete | ✅ |
 
 ### 7.8 Payroll Service (3007, DB `hr_payroll`) — Member 3
 
