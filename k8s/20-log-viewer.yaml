@@ -1,0 +1,91 @@
+# =============================================================================
+# Log viewer: a tiny nginx pod that serves the shared log volume (read-only) as a browsable web page.
+# It is the second backend of the Ingress fanout (http://aupp.com/logs/) and proves that a DIFFERENT pod
+# can read the files written by the service pods.
+# Owner : Member 2
+# Apply : kubectl apply -f k8s/20-log-viewer.yaml
+# Verify: kubectl get pods -n hr-system -l app=log-viewer      then open http://aupp.com/logs/
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: log-viewer-conf
+  namespace: hr-system
+data:
+  default.conf: |
+    server {
+      listen 80;
+      charset utf-8;
+      location = /logs { return 301 /logs/; }
+      location /logs/ {
+        alias /var/log/hr/;
+        autoindex on;                 # directory listing of the log files
+        default_type text/plain;      # show .log files as text in the browser
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-viewer
+  namespace: hr-system
+  labels:
+    app: log-viewer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-viewer
+  template:
+    metadata:
+      labels:
+        app: log-viewer
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /logs/
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: hr-logs
+              mountPath: /var/log/hr
+              readOnly: true         # the viewer can read the logs but never change them
+            - name: conf
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+      volumes:
+        - name: hr-logs
+          persistentVolumeClaim:
+            claimName: hr-logs
+        - name: conf
+          configMap:
+            name: log-viewer-conf
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: log-viewer
+  namespace: hr-system
+  labels:
+    app: log-viewer
+spec:
+  type: ClusterIP
+  selector:
+    app: log-viewer
+  ports:
+    - port: 80
+      targetPort: 80

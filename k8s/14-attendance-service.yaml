@@ -1,0 +1,102 @@
+# =============================================================================
+# Attendance Service (database hr_attendance).
+# Owner : Member 1
+# Apply : kubectl apply -f k8s/14-attendance-service.yaml
+# Verify: kubectl get pods,svc -n hr-system -l app=attendance-service
+# Shows : Deployment (keeps 1 pod(s) running) + ClusterIP Service (stable internal name "attendance-service:3004",
+#         no external access) + ConfigMap/Secret env + shared log volume + health probes.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: attendance-service
+  namespace: hr-system
+  labels:
+    app: attendance-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: attendance-service
+  template:
+    metadata:
+      labels:
+        app: attendance-service
+    spec:
+      enableServiceLinks: false      # do not inject extra env vars for every Service
+      securityContext:               # the image runs as the non-root "node" user (uid 1000)
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000                # lets that user write to the shared log volume
+      containers:
+        - name: attendance-service
+          image: suossovanrith/hr-attendance-service:v1
+          imagePullPolicy: Always
+          # Log to the shared volume as well as to stdout: node runs as PID 1 (exec) so it receives SIGTERM
+          # directly; a background `tee` copies everything it prints into /var/log/hr/<service>-<pod>.log.
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              mkdir -p /var/log/hr
+              mkfifo /tmp/out.fifo
+              tee -a /var/log/hr/attendance-service-$HOSTNAME.log < /tmp/out.fifo &
+              exec node src/server.js > /tmp/out.fifo 2>&1
+          ports:
+            - containerPort: 3004
+          envFrom:
+            - configMapRef:
+                name: hr-config
+          env:
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: hr-secrets
+                  key: MONGODB_URI
+            - name: INTERNAL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hr-secrets
+                  key: INTERNAL_API_KEY
+          readinessProbe:            # Service sends traffic only to pods that answer here
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 8
+            periodSeconds: 10
+          livenessProbe:             # Kubernetes restarts the container if this keeps failing
+            httpGet:
+              path: /health
+              port: 3004
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 96Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+          volumeMounts:
+            - name: hr-logs
+              mountPath: /var/log/hr
+      volumes:
+        - name: hr-logs
+          persistentVolumeClaim:
+            claimName: hr-logs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: attendance-service
+  namespace: hr-system
+  labels:
+    app: attendance-service
+spec:
+  type: ClusterIP                    # reachable only inside the cluster
+  selector:
+    app: attendance-service
+  ports:
+    - port: 3004
+      targetPort: 3004

@@ -1,0 +1,48 @@
+# =============================================================================
+# Ingress = the cluster's front door, with FANOUT DNS: one domain name (aupp.com), several paths,
+# each path routed to a different backend Service.
+#
+#     http://aupp.com/api/...   --->  api-gateway Service  (all business traffic; JWT + RBAC at the gateway)
+#     http://aupp.com/health    --->  api-gateway Service
+#     http://aupp.com/logs/     --->  log-viewer Service   (read-only view of the shared log volume)
+#
+# Only the gateway and the log viewer are reachable from outside. Every other service is ClusterIP.
+# Owner : Member 1
+# Needs : minikube addons enable ingress
+# Apply : kubectl apply -f k8s/30-ingress.yaml
+# Verify: kubectl get ingress -n hr-system       (ADDRESS appears after a few seconds)
+# DNS   : add "127.0.0.1 aupp.com" to the Windows hosts file and keep `minikube tunnel` running
+#         (see k8s/README.md). Without a hosts entry you can test with:  curl -H "Host: aupp.com" http://127.0.0.1/health
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hr-ingress
+  namespace: hr-system
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: aupp.com
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 3000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 3000
+          - path: /logs
+            pathType: Prefix
+            backend:
+              service:
+                name: log-viewer
+                port:
+                  number: 80

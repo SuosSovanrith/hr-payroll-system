@@ -1,0 +1,28 @@
+# =============================================================================
+# ConfigMap: NON-secret settings shared by every pod (injected as environment variables).
+#   * Service URLs use Kubernetes DNS: <service-name>:<port> resolves inside the namespace.
+#   * REDIS_DISABLED=true : the final project may not run a database container, so the gateway's
+#     /api/lb-info uses an in-memory counter instead of Redis (the pod name proves load balancing).
+# Owner : Member 3
+# Apply : kubectl apply -f k8s/01-configmap.yaml
+# Verify: kubectl describe configmap hr-config -n hr-system
+# Note  : pods read env vars at start. After editing this file run `kubectl apply` and then
+#         `kubectl rollout restart deployment -n hr-system` so the pods pick up the change.
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hr-config
+  namespace: hr-system
+data:
+  NODE_ENV: "production"
+  JWT_EXPIRES_IN: "1h"
+  REDIS_DISABLED: "true"
+  REGISTRATION_SERVICE_URL: "http://registration-service:3001"
+  LOGIN_SERVICE_URL: "http://login-service:3002"
+  EMPLOYEE_SERVICE_URL: "http://employee-service:3003"
+  ATTENDANCE_SERVICE_URL: "http://attendance-service:3004"
+  LEAVE_SERVICE_URL: "http://leave-service:3005"
+  PERFORMANCE_SERVICE_URL: "http://performance-service:3006"
+  PAYROLL_SERVICE_URL: "http://payroll-service:3007"
+  AUDIT_SERVICE_URL: "http://audit-service:3008"

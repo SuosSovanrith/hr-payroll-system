@@ -12,6 +12,8 @@ export const env = {
   jwtSecret: required('JWT_SECRET'), // must be the same secret the Login Service signs with
   internalKey: required('INTERNAL_API_KEY'), // added to every proxied request so services trust the gateway
   redisUrl: process.env.REDIS_URL || 'redis://redis:6379',
+  // Kubernetes: no Redis container is allowed, so REDIS_DISABLED=true switches /api/lb-info to an in-memory counter.
+  redisDisabled: process.env.REDIS_DISABLED === 'true',
   auditServiceUrl: process.env.AUDIT_SERVICE_URL || '',
   // Where each downstream service lives (docker service name locally, EC2 private IP when deployed).
   serviceUrls: {
