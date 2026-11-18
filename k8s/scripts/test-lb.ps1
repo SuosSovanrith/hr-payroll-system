@@ -4,7 +4,7 @@
   The pod name should change between calls (round robin across the gateway replicas).
   Owner: Member 1
 #>
-param([int]$Count = 10, [string]$BaseUrl = "http://aupp.com")
+param([int]$Count = 10, [string]$BaseUrl = "http://hrsystem.com")
 for ($i = 1; $i -le $Count; $i++) {
   $r = Invoke-RestMethod "$BaseUrl/api/lb-info"
   "{0,2}  servedBy = {1}   (this pod has answered {2} request(s))" -f $i, $r.data.servedBy, $r.data.total

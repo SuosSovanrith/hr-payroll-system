@@ -1,10 +1,10 @@
 # =============================================================================
 # Log viewer: a tiny nginx pod that serves the shared log volume (read-only) as a browsable web page.
-# It is the second backend of the Ingress fanout (http://aupp.com/logs/) and proves that a DIFFERENT pod
+# It is the second backend of the Ingress fanout (http://hrsystem.com/logs/) and proves that a DIFFERENT pod
 # can read the files written by the service pods.
 # Owner : Member 2
 # Apply : kubectl apply -f k8s/20-log-viewer.yaml
-# Verify: kubectl get pods -n hr-system -l app=log-viewer      then open http://aupp.com/logs/
+# Verify: kubectl get pods -n hr-system -l app=log-viewer      then open http://hrsystem.com/logs/
 # =============================================================================
 apiVersion: v1
 kind: ConfigMap

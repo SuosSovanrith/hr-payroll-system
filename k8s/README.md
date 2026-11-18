@@ -1,8 +1,8 @@
 # Final Project: HR & Payroll System on Kubernetes
 
-The midterm microservices (same code, same APIs, same MongoDB Atlas database) now run on a **Kubernetes cluster (Minikube)**, described **only with YAML files**, with a domain name (`aupp.com`) using **fanout DNS**, and a **shared Kubernetes volume** for logs.
+The midterm microservices (same code, same APIs, same MongoDB Atlas database) now run on a **Kubernetes cluster (Minikube)**, described **only with YAML files**, with a domain name (`hrsystem.com`) using **fanout DNS**, and a **shared Kubernetes volume** for logs.
 
-> Quick start for the impatient: [Step-by-step deployment](#4-step-by-step-deployment). Demo script and likely questions: [`DEMO_QA.md`](DEMO_QA.md).
+> Quick start for the impatient: [Step-by-step deployment](#4-step-by-step-deployment).
 
 ## Contents
 
@@ -28,7 +28,7 @@ Only the **hosting layer** changed. The services, APIs, JWT/RBAC and the Atlas d
 | `.env` files | **ConfigMap** (settings) + **Secret** (credentials) |
 | 2 gateway containers `gw1`, `gw2` | Gateway Deployment with 2 replicas (pods named by Kubernetes) |
 | Redis shared counter | Removed (no database container allowed): `/api/lb-info` uses an in-memory counter per pod |
-| EC2 public IP | `http://aupp.com` (hosts file + `minikube tunnel`) |
+| EC2 public IP | `http://hrsystem.com` (hosts file + `minikube tunnel`) |
 | no shared storage | **PersistentVolumeClaim** `hr-logs` shared by all pods |
 
 The only code change is in the gateway: `REDIS_DISABLED=true` switches `/api/lb-info` to the in-memory counter. Without that variable (Compose / EC2) it behaves exactly as before.
@@ -41,7 +41,7 @@ The only code change is in the gateway: `REDIS_DISABLED=true` switches `/api/lb-
 | 2. Multiple Pods | 9 Deployments (gateway x2 replicas) + log-viewer = 11 pods, plus a 2-container gateway pod | `kubectl get pods -n hr-system` |
 | 3. All requests through the API Gateway | Services are `ClusterIP` (no outside access); Ingress sends `/api` only to the gateway; services also reject calls without the internal key | Section 5.1 |
 | 4. Cloud database, no database container | MongoDB Atlas; Redis removed | `01-configmap.yaml`, `02-secret` |
-| 5. Fanout DNS with a domain | `aupp.com`: `/api` and `/health` to the gateway, `/logs` to the log viewer | `30-ingress.yaml`, Section 5.2 |
+| 5. Fanout DNS with a domain | `hrsystem.com`: `/api` and `/health` to the gateway, `/logs` to the log viewer | `30-ingress.yaml`, Section 5.2 |
 | 6. Kubernetes Volume shared by multiple containers | PVC `hr-logs` mounted by all service pods (write) and the log viewer (read-only); the gateway pod also has a second container reading it | Section 5.6 |
 | 7. Local deployment with Minikube | Whole stack runs on Minikube | Section 4 |
 
@@ -49,7 +49,7 @@ The only code change is in the gateway: `REDIS_DISABLED=true` switches `/api/lb-
 
 ```
 Postman / browser
-      |  http://aupp.com   (hosts file -> 127.0.0.1, minikube tunnel)
+      |  http://hrsystem.com   (hosts file -> 127.0.0.1, minikube tunnel)
       v
  Ingress (nginx controller)  --- fanout by path ---
       |  /api, /health                         |  /logs
@@ -80,7 +80,7 @@ Postman / browser
 | `15-leave-service.yaml`, `16-performance-service.yaml` | Leave and Performance | Member 2 |
 | `17-payroll-service.yaml`, `18-audit-service.yaml` | Payroll and Audit | Member 3 |
 | `20-log-viewer.yaml` | nginx pod that serves the shared logs, + its ConfigMap and Service | Member 2 |
-| `30-ingress.yaml` | Ingress with the `aupp.com` fanout | Member 1 |
+| `30-ingress.yaml` | Ingress with the `hrsystem.com` fanout | Member 1 |
 | `optional/40-seed-job.yaml` | One-off Job that creates the demo accounts | Member 3 |
 | `scripts/*.ps1` | Build/push images, deploy, hosts file, LB test, destroy | Member 1 / All |
 
@@ -154,22 +154,22 @@ The script checks the Secret, applies every file in order, waits for each Deploy
 
 Manual equivalent: `kubectl apply -f k8s/00-namespace.yaml`, then 01, 02-secret, 03, 10 to 18, 20 and 30 in that order.
 
-### Step 6: Make `aupp.com` work
+### Step 6: Make `hrsystem.com` work
 
 In a PowerShell opened **as Administrator**:
 ```powershell
-.\k8s\scripts\hosts-setup.ps1                   # adds: 127.0.0.1 aupp.com
+.\k8s\scripts\hosts-setup.ps1                   # adds: 127.0.0.1 hrsystem.com
 minikube tunnel                                 # keep this window open during the demo
 ```
 Test in a normal window:
 ```powershell
-curl.exe http://aupp.com/health
+curl.exe http://hrsystem.com/health
 ```
 It should return `{"status":"ok","service":"api-gateway",...}`.
 
 ### Step 7: Use the API
 
-In Postman, set the collection variable `baseUrl` to `http://aupp.com` and run the existing collection (login first). Everything goes through `http://aupp.com/api/...`.
+In Postman, set the collection variable `baseUrl` to `http://hrsystem.com` and run the existing collection (login first). Everything goes through `http://hrsystem.com/api/...`.
 
 ## 5. Demos and verification
 
@@ -179,8 +179,8 @@ All commands use `-n hr-system`.
 
 ```powershell
 kubectl get svc -n hr-system                     # all ClusterIP: no EXTERNAL-IP, no NodePort
-curl.exe -i http://aupp.com/api/employees        # 401 NO_TOKEN: reaches the gateway, which demands a JWT
-curl.exe -i http://aupp.com/internal/employees/1 # 404: internal routes are not exposed
+curl.exe -i http://hrsystem.com/api/employees        # 401 NO_TOKEN: reaches the gateway, which demands a JWT
+curl.exe -i http://hrsystem.com/internal/employees/1 # 404: internal routes are not exposed
 # even from INSIDE the cluster, a service refuses a call that did not come through the gateway:
 kubectl run curl-test -n hr-system --rm -it --restart=Never --image=curlimages/curl -- curl -s http://employee-service:3003/api/employees
 # -> ... "code":"GATEWAY_ONLY"
@@ -189,9 +189,9 @@ kubectl run curl-test -n hr-system --rm -it --restart=Never --image=curlimages/c
 ### 5.2 Fanout DNS
 
 ```powershell
-curl.exe -i http://aupp.com/health               # /health -> api-gateway
-curl.exe -i http://aupp.com/api/lb-info          # /api    -> api-gateway
-start http://aupp.com/logs/                      # /logs   -> log-viewer (a different Service and pod)
+curl.exe -i http://hrsystem.com/health               # /health -> api-gateway
+curl.exe -i http://hrsystem.com/api/lb-info          # /api    -> api-gateway
+start http://hrsystem.com/logs/                      # /logs   -> log-viewer (a different Service and pod)
 kubectl describe ingress hr-ingress -n hr-system # shows the host and the three path rules
 ```
 
@@ -227,7 +227,7 @@ kubectl exec -n hr-system deploy/payroll-service -- sh -c 'tail -n 3 /var/log/hr
 kubectl get pods -n hr-system -l app=api-gateway
 kubectl logs -n hr-system <gateway-pod-name> -c log-tail --tail=5
 # 4. the log viewer pod serves all the files in the browser
-start http://aupp.com/logs/
+start http://hrsystem.com/logs/
 # 5. the data outlives pods
 kubectl delete pod -n hr-system -l app=employee-service
 kubectl exec -n hr-system deploy/payroll-service -- ls -l /var/log/hr     # the old log file is still there
@@ -258,7 +258,7 @@ kubectl describe pod -n hr-system -l app=login-service    # Liveness / Readiness
 - [ ] Screenshots: `kubectl get all,ingress,pvc -n hr-system`, the ConfigMap and Secret descriptions (5.7), self-healing (5.5), scaling and rolling update (5.4), the seed job logs if used
 
 ### Everyone
-- [ ] Postman through `http://aupp.com`: successful calls for every service, plus the 401 / 403 / 404 / 409 tests
+- [ ] Postman through `http://hrsystem.com`: successful calls for every service, plus the 401 / 403 / 404 / 409 tests
 - [ ] Screenshots of the YAML files for the report
 - [ ] Practice the demo with [`DEMO_QA.md`](DEMO_QA.md): everyone must be able to answer questions on every concept
 
@@ -271,9 +271,9 @@ kubectl describe pod -n hr-system -l app=login-service    # Liveness / Readiness
 | Pod `Pending` | Not enough memory or CPU: restart Minikube with more (`minikube stop`, `minikube start --memory=6144`), or `kubectl describe pod` for the reason |
 | PVC stays `Pending` | `kubectl get storageclass` should show `standard`; if not: `minikube addons enable storage-provisioner` and `minikube addons enable default-storageclass`. A PVC binds when its first pod starts |
 | `Permission denied` writing `/var/log/hr` | `minikube ssh -- sudo chmod -R 777 /tmp/hostpath-provisioner/hr-system/hr-logs`, then `kubectl rollout restart deployment -n hr-system` |
-| `aupp.com` does not resolve | Hosts file entry missing (run `hosts-setup.ps1` as Administrator), then `ipconfig /flushdns`; `ping aupp.com` must answer from 127.0.0.1 |
-| Connection refused / timeout on `aupp.com` | `minikube tunnel` is not running (needs an Administrator window), or the ingress controller is not ready: `kubectl get pods -n ingress-nginx`. Alternative: `kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 80:80` |
-| Browser shows nginx `404 Not Found` | You used an IP or another host name; use `http://aupp.com/...`. Check `kubectl describe ingress hr-ingress -n hr-system` |
+| `hrsystem.com` does not resolve | Hosts file entry missing (run `hosts-setup.ps1` as Administrator), then `ipconfig /flushdns`; `ping hrsystem.com` must answer from 127.0.0.1 |
+| Connection refused / timeout on `hrsystem.com` | `minikube tunnel` is not running (needs an Administrator window), or the ingress controller is not ready: `kubectl get pods -n ingress-nginx`. Alternative: `kubectl port-forward -n ingress-nginx service/ingress-nginx-controller 80:80` |
+| Browser shows nginx `404 Not Found` | You used an IP or another host name; use `http://hrsystem.com/...`. Check `kubectl describe ingress hr-ingress -n hr-system` |
 | `{"code":"BAD_GATEWAY"}` | The target service pod is not ready or its URL in `01-configmap.yaml` is wrong. `kubectl get pods -n hr-system`, then restart the gateway after changing the ConfigMap: `kubectl rollout restart deployment/api-gateway -n hr-system` |
 | 401 on every call after login | `JWT_SECRET` differs between Login and the gateway (both read the same Secret). Re-apply the Secret and `kubectl rollout restart deployment -n hr-system` |
 | ConfigMap or Secret change has no effect | Pods read them only at start: `kubectl rollout restart deployment -n hr-system` |

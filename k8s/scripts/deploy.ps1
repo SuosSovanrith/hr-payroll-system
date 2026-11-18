@@ -41,4 +41,4 @@ foreach ($d in "api-gateway","registration-service","login-service","employee-se
 }
 Write-Host ""
 kubectl get all,ingress,pvc -n $ns
-Write-Host "`nNext: add '127.0.0.1 aupp.com' to the hosts file (k8s\scripts\hosts-setup.ps1) and run 'minikube tunnel'." -ForegroundColor Green
+Write-Host "`nNext: add '127.0.0.1 hrsystem.com' to the hosts file (k8s\scripts\hosts-setup.ps1) and run 'minikube tunnel'." -ForegroundColor Green
