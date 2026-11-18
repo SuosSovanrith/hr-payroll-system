@@ -245,7 +245,7 @@ kubectl describe pod -n hr-system -l app=login-service    # Liveness / Readiness
 ## 6. Team checklist and screenshots
 
 ### Member 1: gateway, employee, attendance, Ingress, images
-- [ ] Build and push the 9 images; the repositories are public
+
 - [ ] Read and explain `10-api-gateway.yaml`, `13-employee-service.yaml`, `14-attendance-service.yaml`, `30-ingress.yaml`
 - [ ] Screenshots: `kubectl describe ingress`, the `/health`, `/api` and `/logs/` fanout, the gateway-only tests (5.1), the load-balancing output (5.3) and `get pods -o wide`
 
@@ -254,13 +254,13 @@ kubectl describe pod -n hr-system -l app=login-service    # Liveness / Readiness
 - [ ] Screenshots: `kubectl get pvc` (Bound), the volume demos (5.6): listing from two pods, the sidecar logs, the browser at `/logs/`, and the file surviving a pod deletion
 
 ### Member 3: registration, login, payroll, audit, ConfigMap, Secret
-- [ ] Read and explain `00-namespace.yaml`, `01-configmap.yaml`, the Secret template, `11`, `12`, `17`, `18`
+- [ ] Build and push the 9 images; the repositories are public
+- [ ] Read and explain `11-registration-service.yaml`, `12-login-service.yaml`, `17-payroll-service.yaml`, `18-audit-service.yaml`, `00-namespace.yaml`, `01-configmap.yaml`, the Secret template
 - [ ] Screenshots: `kubectl get all,ingress,pvc -n hr-system`, the ConfigMap and Secret descriptions (5.7), self-healing (5.5), scaling and rolling update (5.4), the seed job logs if used
 
 ### Everyone
 - [ ] Postman through `http://hrsystem.com`: successful calls for every service, plus the 401 / 403 / 404 / 409 tests
 - [ ] Screenshots of the YAML files for the report
-- [ ] Practice the demo with [`DEMO_QA.md`](DEMO_QA.md): everyone must be able to answer questions on every concept
 
 ## 7. Troubleshooting
 
