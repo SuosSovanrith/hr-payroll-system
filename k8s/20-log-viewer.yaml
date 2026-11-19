@@ -2,10 +2,15 @@
 # Log viewer: a tiny nginx pod that serves the shared log volume (read-only) as a browsable web page.
 # It is the second backend of the Ingress fanout (http://hrsystem.com/logs/) and proves that a DIFFERENT pod
 # can read the files written by the service pods.
-# Owner : Member 2
-# Apply : kubectl apply -f k8s/20-log-viewer.yaml
-# Verify: kubectl get pods -n hr-system -l app=log-viewer      then open http://hrsystem.com/logs/
+# -----------------------------------------------------------------------------
+# Owner  : Member 2
+# Apply  : kubectl apply -f k8s/20-log-viewer.yaml
+# Verify : kubectl get pods -n hr-system -l app=log-viewer      then open http://hrsystem.com/logs/
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# ConfigMap: nginx config that exposes /var/log/hr under the /logs/ URL path
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -24,6 +29,9 @@ data:
       }
     }
 ---
+# -----------------------------------------------------------------------------
+# Deployment: one nginx pod that mounts the shared logs and the config above
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -41,18 +49,22 @@ spec:
       labels:
         app: log-viewer
     spec:
-      enableServiceLinks: false
+      enableServiceLinks: false      # do not inject extra env vars for every Service
+
       containers:
         - name: nginx
           image: nginx:1.27-alpine
           ports:
             - containerPort: 80
+
+          # Pod receives traffic only after the log page answers
           readinessProbe:
             httpGet:
               path: /logs/
               port: 80
             initialDelaySeconds: 3
             periodSeconds: 10
+
           resources:
             requests:
               cpu: 10m
@@ -60,21 +72,28 @@ spec:
             limits:
               cpu: 100m
               memory: 64Mi
+
           volumeMounts:
             - name: hr-logs
               mountPath: /var/log/hr
               readOnly: true         # the viewer can read the logs but never change them
             - name: conf
               mountPath: /etc/nginx/conf.d/default.conf
-              subPath: default.conf
+              subPath: default.conf  # mount just this one file, not the whole folder
+
       volumes:
+        # Shared log volume (see 03-storage.yaml)
         - name: hr-logs
           persistentVolumeClaim:
             claimName: hr-logs
+        # nginx config from the ConfigMap above
         - name: conf
           configMap:
             name: log-viewer-conf
 ---
+# -----------------------------------------------------------------------------
+# Service: internal name "log-viewer:80", used by the Ingress for the /logs path
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -83,7 +102,7 @@ metadata:
   labels:
     app: log-viewer
 spec:
-  type: ClusterIP
+  type: ClusterIP                    # reachable only inside the cluster
   selector:
     app: log-viewer
   ports:

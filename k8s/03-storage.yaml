@@ -4,9 +4,10 @@
 #   mounts the same claim read-only. One volume, many pods and containers.
 #   Minikube's default StorageClass creates the disk automatically; the data survives pod restarts.
 #   ReadWriteOnce is enough on a single-node cluster (all pods share the one node).
-# Owner : Member 2
-# Apply : kubectl apply -f k8s/03-storage.yaml
-# Verify: kubectl get pvc -n hr-system      (STATUS should become Bound once the first pod uses it)
+# -----------------------------------------------------------------------------
+# Owner  : Member 2
+# Apply  : kubectl apply -f k8s/03-storage.yaml
+# Verify : kubectl get pvc -n hr-system      (STATUS becomes Bound once the first pod uses it)
 # =============================================================================
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -15,7 +16,7 @@ metadata:
   namespace: hr-system
 spec:
   accessModes:
-    - ReadWriteOnce
+    - ReadWriteOnce        # one node may mount it read-write
   resources:
     requests:
-      storage: 1Gi
+      storage: 1Gi         # size of the shared log disk

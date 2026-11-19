@@ -1,11 +1,17 @@
 # =============================================================================
 # Audit Service (database hr_audit). Receives audit events from the gateway, Login and Registration.
-# Owner : Member 3
-# Apply : kubectl apply -f k8s/18-audit-service.yaml
-# Verify: kubectl get pods,svc -n hr-system -l app=audit-service
-# Shows : Deployment (keeps 1 pod(s) running) + ClusterIP Service (stable internal name "audit-service:3008",
-#         no external access) + ConfigMap/Secret env + shared log volume + health probes.
+# -----------------------------------------------------------------------------
+# Owner  : Member 3
+# Apply  : kubectl apply -f k8s/18-audit-service.yaml
+# Verify : kubectl get pods,svc -n hr-system -l app=audit-service
+# Shows  : Deployment (keeps 1 pod running) + ClusterIP Service (stable internal
+#          name "audit-service:3008", no external access) + ConfigMap/Secret env
+#          + shared log volume + health probes.
 # =============================================================================
+
+# -----------------------------------------------------------------------------
+# Deployment: keeps the desired number of pods running
+# -----------------------------------------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,15 +30,19 @@ spec:
         app: audit-service
     spec:
       enableServiceLinks: false      # do not inject extra env vars for every Service
-      securityContext:               # the image runs as the non-root "node" user (uid 1000)
+
+      # The image runs as the non-root "node" user (uid 1000)
+      securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000                # lets that user write to the shared log volume
+
       containers:
         - name: audit-service
           image: suossovanrith/hr-audit-service:v1
           imagePullPolicy: Always
+
           # Log to the shared volume as well as to stdout: node runs as PID 1 (exec) so it receives SIGTERM
           # directly; a background `tee` copies everything it prints into /var/log/hr/<service>-<pod>.log.
           command: ["/bin/sh", "-c"]
@@ -42,11 +52,16 @@ spec:
               mkfifo /tmp/out.fifo
               tee -a /var/log/hr/audit-service-$HOSTNAME.log < /tmp/out.fifo &
               exec node src/server.js > /tmp/out.fifo 2>&1
+
           ports:
             - containerPort: 3008
+
+          # Non-secret settings (service URLs, NODE_ENV, ...) from ConfigMap "hr-config"
           envFrom:
             - configMapRef:
                 name: hr-config
+
+          # Sensitive values come from Secret "hr-secrets"
           env:
             - name: MONGODB_URI
               valueFrom:
@@ -58,19 +73,24 @@ spec:
                 secretKeyRef:
                   name: hr-secrets
                   key: INTERNAL_API_KEY
-          readinessProbe:            # Service sends traffic only to pods that answer here
+
+          # Service sends traffic only to pods that answer here
+          readinessProbe:
             httpGet:
               path: /health
               port: 3008
             initialDelaySeconds: 8
             periodSeconds: 10
-          livenessProbe:             # Kubernetes restarts the container if this keeps failing
+
+          # Kubernetes restarts the container if this keeps failing
+          livenessProbe:
             httpGet:
               path: /health
               port: 3008
             initialDelaySeconds: 30
             periodSeconds: 20
             failureThreshold: 3
+
           resources:
             requests:
               cpu: 50m
@@ -78,14 +98,20 @@ spec:
             limits:
               cpu: 300m
               memory: 256Mi
+
           volumeMounts:
             - name: hr-logs
               mountPath: /var/log/hr
+
+      # Shared log volume (see 03-storage.yaml)
       volumes:
         - name: hr-logs
           persistentVolumeClaim:
             claimName: hr-logs
 ---
+# -----------------------------------------------------------------------------
+# Service: stable internal name for the pod(s) above
+# -----------------------------------------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
