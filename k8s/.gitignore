@@ -1,0 +1,3 @@
+# Real secrets must never be committed (only templates/secret.example.yaml is).
+02-secret.yaml
+*.secret.yaml
