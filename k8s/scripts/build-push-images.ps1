@@ -5,7 +5,7 @@
                        -NoPush        only build locally
                        -Only employee-service,payroll-service    build just some services
   Prerequisite:        docker login   (once, with the suossovanrith account)
-  Owner:               Member 1
+  Owner:               Member 3
 #>
 param(
   [string]$Tag = "v1",
