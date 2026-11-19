@@ -2,10 +2,11 @@
 # OPTIONAL: one-off Job that creates the demo accounts (admin / hr / employee) in the database.
 # Only needed when the Atlas database is empty; with the shared team database they already exist.
 # Safe to run twice (existing emails are skipped).
-# Owner : Member 3
-# Apply : kubectl apply -f k8s/optional/40-seed-job.yaml
-# Verify: kubectl logs job/seed-demo-users -n hr-system
-# Re-run: kubectl delete job seed-demo-users -n hr-system --ignore-not-found ; then apply again
+# -----------------------------------------------------------------------------
+# Owner  : Member 3
+# Apply  : kubectl apply -f k8s/optional/40-seed-job.yaml
+# Verify : kubectl logs job/seed-demo-users -n hr-system
+# Re-run : kubectl delete job seed-demo-users -n hr-system --ignore-not-found ; then apply again
 # =============================================================================
 apiVersion: batch/v1
 kind: Job
@@ -13,23 +14,30 @@ metadata:
   name: seed-demo-users
   namespace: hr-system
 spec:
-  backoffLimit: 3
+  backoffLimit: 3                    # retry up to 3 times if the Job fails
   ttlSecondsAfterFinished: 600       # clean itself up 10 minutes after finishing
   template:
     spec:
       restartPolicy: OnFailure
-      enableServiceLinks: false
+      enableServiceLinks: false      # do not inject extra env vars for every Service
+
+      # Run as the non-root "node" user (uid 1000)
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         runAsGroup: 1000
+
       containers:
         - name: seed
-          image: suossovanrith/hr-registration-service:v1
-          command: ["node", "src/scripts/seed.js"]
+          image: suossovanrith/hr-registration-service:v1   # reuses the Registration image
+          command: ["node", "src/scripts/seed.js"]          # runs the seed script instead of the server
+
+          # Non-secret settings from ConfigMap "hr-config"
           envFrom:
             - configMapRef:
                 name: hr-config
+
+          # Sensitive values come from Secret "hr-secrets"
           env:
             - name: MONGODB_URI
               valueFrom:

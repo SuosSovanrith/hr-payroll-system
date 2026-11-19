@@ -1,8 +1,9 @@
 # =============================================================================
 # Namespace: one isolated "folder" in the cluster that holds everything for this project.
-# Owner : Member 3
-# Apply : kubectl apply -f k8s/00-namespace.yaml
-# Verify: kubectl get ns hr-system
+# -----------------------------------------------------------------------------
+# Owner  : Member 3
+# Apply  : kubectl apply -f k8s/00-namespace.yaml
+# Verify : kubectl get ns hr-system
 # =============================================================================
 apiVersion: v1
 kind: Namespace
